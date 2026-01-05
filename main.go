@@ -18,7 +18,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var execCommand = exec.Command
+var (
+	execCommand = exec.Command
+	getHomeDir  = os.UserHomeDir
+	getInput    = func() io.Reader { return os.Stdin }
+)
 
 // Config represents the ~/.kboot.yaml structure
 type Config struct {
@@ -91,10 +95,14 @@ type KEnv struct {
 }
 
 func main() {
+	// 1. configuration
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "auth":
 			handleAuthCommand(os.Args[2:])
+			return
+		case "cluster":
+			handleClusterCommand(os.Args[2:])
 			return
 		case "help", "--help", "-h":
 			printHelp()
@@ -106,12 +114,14 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Println("kboot - DevOps CLI for EKS & AWS Auth Management (v1.5.0)")
+	fmt.Println("kboot - DevOps CLI for EKS & AWS Auth Management (v1.6.0)")
 	fmt.Println("\nUsage: kboot [command]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  auth       Manage AWS credentials and SSO configurations")
 	fmt.Println("    new      Interactive setup (backup + clean init)")
 	fmt.Println("    add      Interactive addition of profiles")
+	fmt.Println("  cluster    Manage cluster configurations")
+	fmt.Println("    add      Interactive addition of a cluster to ~/.kboot.yaml")
 	fmt.Println("\n  (empty)    Sync clusters defined in ~/.kboot.yaml and launch k9s")
 	fmt.Println("\nFlags:")
 	fmt.Println("  -h, --help Show this help message")
@@ -143,10 +153,152 @@ func printAuthHelp() {
 	fmt.Println("  add   Interactive addition of AWS credentials/profiles")
 }
 
+func handleClusterCommand(args []string) {
+	if len(args) == 0 {
+		printClusterHelp()
+		os.Exit(1)
+	}
+	switch args[0] {
+	case "add":
+		clusterAdd()
+	case "help", "--help", "-h":
+		printClusterHelp()
+	default:
+		fmt.Printf("Unknown cluster command: %s\n", args[0])
+		printClusterHelp()
+		os.Exit(1)
+	}
+}
+
+func printClusterHelp() {
+	fmt.Println("Usage: kboot cluster <command>")
+	fmt.Println("\nCommands:")
+	fmt.Println("  add   Interactive addition of a cluster to ~/.kboot.yaml")
+}
+
+// --- Cluster Features ---
+
+func clusterAdd() {
+	reader := bufio.NewReader(getInput())
+
+	// 1. Load AWS Profiles
+	fmt.Println("Discovering AWS Profiles...")
+	profiles, _ := listAWSProfiles()
+	if len(profiles) > 0 {
+		fmt.Println("Available Profiles:")
+		for i, p := range profiles {
+			fmt.Printf(" - %s", p)
+			if (i+1)%5 == 0 {
+				fmt.Println()
+			} else {
+				fmt.Print("   ")
+			}
+		}
+		fmt.Println()
+	} else {
+		fmt.Println("No profiles found in ~/.aws/credentials or ~/.aws/config")
+	}
+
+	// 2. Prompts
+	fmt.Print("\nAlias (short name for display): ")
+	alias, _ := reader.ReadString('\n')
+	alias = strings.TrimSpace(alias)
+
+	fmt.Print("Real Cluster Name (AWS EKS Name): ")
+	clusterName, _ := reader.ReadString('\n')
+	clusterName = strings.TrimSpace(clusterName)
+
+	fmt.Print("Region (default: us-east-1): ")
+	region, _ := reader.ReadString('\n')
+	region = strings.TrimSpace(region)
+	if region == "" {
+		region = "us-east-1"
+	}
+
+	fmt.Print("AWS Profile Name: ")
+	profile, _ := reader.ReadString('\n')
+	profile = strings.TrimSpace(profile)
+
+	// 3. Save
+	configPath, err := getConfigPath()
+	if err != nil {
+		fatal("Error getting config path: %v", err)
+	}
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		fatal("Error loading config: %v", err)
+	}
+
+	newCluster := Cluster{
+		Alias:   alias,
+		Name:    clusterName,
+		Region:  region,
+		Profile: profile,
+	}
+
+	cfg.Clusters = append(cfg.Clusters, newCluster)
+
+	// Write back
+	f, err := os.Create(configPath)
+	if err != nil {
+		fatal("Error saving config: %v", err)
+	}
+	defer f.Close()
+
+	encoder := yaml.NewEncoder(f)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(cfg); err != nil {
+		fatal("Error encoding config: %v", err)
+	}
+
+	fmt.Printf("✓ Added cluster '%s' to %s\n", alias, configPath)
+}
+
+func listAWSProfiles() ([]string, error) {
+	home, err := getHomeDir()
+	if err != nil {
+		return nil, err
+	}
+
+	profiles := make(map[string]bool)
+
+	// Helper to extract profile names from standard ini-like files
+	// Regex or simple parsing. Going simple parsing.
+	parseFile := func(path string, isConfig bool) {
+		f, err := os.Open(path)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+				content := line[1 : len(line)-1]
+				if isConfig {
+					// .aws/config uses [profile name] or [default]
+					content = strings.TrimPrefix(content, "profile ")
+					content = strings.TrimSpace(content)
+				}
+				profiles[content] = true
+			}
+		}
+	}
+
+	parseFile(filepath.Join(home, ".aws", "credentials"), false)
+	parseFile(filepath.Join(home, ".aws", "config"), true)
+
+	var list []string
+	for p := range profiles {
+		list = append(list, p)
+	}
+	return list, nil
+}
+
 // --- Auth Features ---
 
 func authNew() {
-	reader := bufio.NewReader(os.Stdin)
+	reader := bufio.NewReader(getInput())
 	fmt.Println("Do you want to setup:")
 	fmt.Println(" [1] Static Credentials (~/.aws/credentials)")
 	fmt.Println(" [2] SSO Profiles (~/.aws/config)")
@@ -154,7 +306,7 @@ func authNew() {
 	choice, _ := reader.ReadString('\n')
 	choice = strings.TrimSpace(choice)
 
-	home, err := os.UserHomeDir()
+	home, err := getHomeDir()
 	if err != nil {
 		fatal("Could not find home directory: %v", err)
 	}
@@ -164,11 +316,12 @@ func authNew() {
 	}
 
 	var targetFile string
-	if choice == "1" {
+	switch choice {
+	case "1":
 		targetFile = filepath.Join(awsDir, "credentials")
-	} else if choice == "2" {
+	case "2":
 		targetFile = filepath.Join(awsDir, "config")
-	} else {
+	default:
 		fatal("Invalid choice")
 	}
 
@@ -191,7 +344,7 @@ func authNew() {
 }
 
 func authAdd() {
-	reader := bufio.NewReader(os.Stdin)
+	reader := bufio.NewReader(getInput())
 	fmt.Println("Which type of credential to add?")
 	fmt.Println(" [1] Static Credentials (key/secret)")
 	fmt.Println(" [2] SSO Profile")
@@ -230,7 +383,7 @@ func addStaticCredential(reader *bufio.Reader) {
 		content += fmt.Sprintf("aws_session_token = %s\n", token)
 	}
 
-	home, _ := os.UserHomeDir()
+	home, _ := getHomeDir()
 	path := filepath.Join(home, ".aws", "credentials")
 	appendToFile(path, content)
 	fmt.Printf("Added profile [%s] to %s\n", profile, path)
@@ -259,7 +412,7 @@ func addSSOProfile(reader *bufio.Reader) {
 
 	content := fmt.Sprintf("\n[profile %s]\nsso_start_url = %s\nsso_region = %s\nsso_account_id = %s\nsso_role_name = %s\n", profile, url, region, accId, roleName)
 
-	home, _ := os.UserHomeDir()
+	home, _ := getHomeDir()
 	path := filepath.Join(home, ".aws", "config")
 	appendToFile(path, content)
 	fmt.Printf("Added profile [%s] to %s\n", profile, path)
@@ -366,7 +519,7 @@ func runKboot() {
 }
 
 func getConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := getHomeDir()
 	if err != nil {
 		return "", err
 	}
@@ -403,7 +556,7 @@ clusters:
 }
 
 func ensureSSOLogin(sessionName string) error {
-	home, err := os.UserHomeDir()
+	home, err := getHomeDir()
 	if err != nil {
 		return err
 	}
