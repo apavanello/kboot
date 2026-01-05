@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -623,9 +624,12 @@ func generateKubeconfig(dir string, c Cluster) (string, error) {
 		"--profile", c.Profile, // Important: use the specific profile
 		"--output", "json")
 
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("aws describe-cluster failed: %w", err)
+		return "", fmt.Errorf("aws describe-cluster failed: %w | stderr: %s", err, stderr.String())
 	}
 
 	var d EKSDescribe
