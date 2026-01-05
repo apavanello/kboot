@@ -488,15 +488,30 @@ func runKboot() {
 
 	fmt.Printf("Loaded configuration with %d clusters\n", len(cfg.Clusters))
 
-	// 2. AWS SSO Authentication
-	// Use the first cluster's profile to check validity
-	var testProfile string
-	if len(cfg.Clusters) > 0 {
-		testProfile = cfg.Clusters[0].Profile
+	// 2. AWS SSO Authentication (Multi-Session Support v1.7.0)
+	sessionsToValidate, err := discoverSessions(cfg.Clusters)
+	if err != nil {
+		fmt.Printf("! Warning: Failed to discover sessions from config: %v\n", err)
 	}
 
-	if err := ensureSSOLogin(cfg.SSOSession, testProfile); err != nil {
-		fatal("SSO login failed: %v", err)
+	// If we found explicitly configured sessions, use them
+	if len(sessionsToValidate) > 0 {
+		fmt.Printf("found %d unique SSO sessions to validate\n", len(sessionsToValidate))
+		for sessionName, testProfile := range sessionsToValidate {
+			if err := ensureSSOLogin(sessionName, testProfile); err != nil {
+				fatal("Failed to login to session %s: %v", sessionName, err)
+			}
+		}
+	} else if cfg.SSOSession != "" {
+		// Fallback to global config if no session links found (Legacy)
+		fmt.Println("No specific sso_session found in profiles, checking legacy global config...")
+		testProfile := ""
+		if len(cfg.Clusters) > 0 {
+			testProfile = cfg.Clusters[0].Profile
+		}
+		if err := ensureSSOLogin(cfg.SSOSession, testProfile); err != nil {
+			fatal("SSO login failed: %v", err)
+		}
 	}
 
 	// 3. Generate Kubeconfigs in Parallel
