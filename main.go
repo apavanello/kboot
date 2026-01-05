@@ -181,18 +181,17 @@ func printClusterHelp() {
 	fmt.Println("  add   Interactive addition of a cluster to ~/.kboot.yaml")
 }
 
-// --- Cluster Features ---
+// ClusterConfig holds the form data
+type ClusterConfig struct {
+	Alias       string
+	ClusterName string
+	Region      string
+	Profile     string
+}
 
-func clusterAdd() {
-	var (
-		alias       string
-		clusterName string
-		region      string
-		profile     string
-	)
-
+// newClusterForm creates a huh.Form for cluster addition and returns pointers to data
+func newClusterForm(data *ClusterConfig) *huh.Form {
 	// 1. Load AWS Profiles for Select List
-	fmt.Println("Discovering AWS Profiles...")
 	profiles, _ := listAWSProfiles()
 
 	// Create options
@@ -205,13 +204,12 @@ func clusterAdd() {
 		profileOptions = append(profileOptions, huh.NewOption("default (No profiles found)", "default"))
 	}
 
-	// 2. Form
-	form := huh.NewForm(
+	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
 				Title("Cluster Alias").
 				Description("Short name for display in k9s/kboot").
-				Value(&alias).
+				Value(&data.Alias).
 				Validate(func(str string) error {
 					if strings.TrimSpace(str) == "" {
 						return fmt.Errorf("alias cannot be empty")
@@ -222,7 +220,7 @@ func clusterAdd() {
 			huh.NewInput().
 				Title("Real Cluster Name").
 				Description("Exact name in AWS EKS").
-				Value(&clusterName).
+				Value(&data.ClusterName).
 				Validate(func(str string) error {
 					if strings.TrimSpace(str) == "" {
 						return fmt.Errorf("cluster name cannot be empty")
@@ -232,29 +230,40 @@ func clusterAdd() {
 
 			huh.NewInput().
 				Title("AWS Region").
-				Value(&region).
-				Suggestions([]string{"us-east-1", "us-west-2", "eu-west-1", "sa-east-1"}), // Helpful suggestions
+				Value(&data.Region).
+				Suggestions([]string{"us-east-1", "us-west-2", "eu-west-1", "sa-east-1"}),
 
 			huh.NewSelect[string]().
 				Title("AWS Profile").
 				Options(profileOptions...).
-				Value(&profile),
+				Value(&data.Profile),
 		),
 	)
+}
+
+func clusterAdd() {
+	fmt.Println("Discovering AWS Profiles...") // Feedback before TUI clears screen
+
+	var data ClusterConfig
+	form := newClusterForm(&data)
 
 	if err := form.Run(); err != nil {
 		fatal("Cancelled")
 	}
 
-	alias = strings.TrimSpace(alias)
-	clusterName = strings.TrimSpace(clusterName)
-	region = strings.TrimSpace(region)
+	saveClusterConfig(data)
+}
+
+func saveClusterConfig(data ClusterConfig) {
+	alias := strings.TrimSpace(data.Alias)
+	clusterName := strings.TrimSpace(data.ClusterName)
+	region := strings.TrimSpace(data.Region)
 	if region == "" {
 		region = "us-east-1"
 	}
-	profile = strings.TrimSpace(profile)
+	profile := strings.TrimSpace(data.Profile)
 
-	// 3. Save
+	// Save
 	configPath, err := getConfigPath()
 	if err != nil {
 		fatal("Error getting config path: %v", err)
@@ -273,20 +282,23 @@ func clusterAdd() {
 
 	cfg.Clusters = append(cfg.Clusters, newCluster)
 
-	// Write back
-	f, err := os.Create(configPath)
-	if err != nil {
+	if err := saveConfigToFile(configPath, cfg); err != nil {
 		fatal("Error saving config: %v", err)
+	}
+	fmt.Printf("✓ Added cluster '%s' to %s\n", alias, configPath)
+}
+
+// Helper to avoid duplication in manage.go
+func saveConfigToFile(path string, cfg *Config) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
 	}
 	defer f.Close()
 
 	encoder := yaml.NewEncoder(f)
 	encoder.SetIndent(2)
-	if err := encoder.Encode(cfg); err != nil {
-		fatal("Error encoding config: %v", err)
-	}
-
-	fmt.Printf("✓ Added cluster '%s' to %s\n", alias, configPath)
+	return encoder.Encode(cfg)
 }
 
 func listAWSProfiles() ([]string, error) {

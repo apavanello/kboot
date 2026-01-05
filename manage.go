@@ -2,14 +2,13 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
-	"gopkg.in/yaml.v3"
 )
 
 // --- TUI Manager (v2.1.0) ---
@@ -31,8 +30,16 @@ func (i clusterItem) Description() string {
 }
 func (i clusterItem) FilterValue() string { return i.Alias }
 
+const (
+	viewList = iota
+	viewAddForm
+)
+
 type managerModel struct {
+	view     int
 	list     list.Model
+	form     *huh.Form
+	formData *ClusterConfig
 	config   *Config
 	path     string
 	err      error
@@ -74,6 +81,7 @@ func initialManagerModel() (*managerModel, error) {
 	}
 
 	return &managerModel{
+		view:   viewList,
 		list:   l,
 		config: cfg,
 		path:   path,
@@ -100,89 +108,126 @@ func (m managerModel) Init() tea.Cmd {
 func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		if m.list.FilterState() == list.Filtering {
-			break
-		}
+	switch m.view {
+	case viewList:
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			if m.list.FilterState() == list.Filtering {
+				break
+			}
 
-		if key.Matches(msg, keyAdd) {
-			// Trigger Add Process
-			return m, m.cmdAddCluster
-		}
+			if key.Matches(msg, keyAdd) {
+				// Switch to Form View
+				m.formData = &ClusterConfig{}
+				m.form = newClusterForm(m.formData)
+				m.view = viewAddForm
+				// Initializing the form sends a message to focus it
+				return m, m.form.Init()
+			}
 
-		if key.Matches(msg, keyDelete) {
-			if len(m.config.Clusters) == 0 {
-				m.status = "No clusters to delete"
+			if key.Matches(msg, keyDelete) {
+				if len(m.config.Clusters) == 0 {
+					m.status = "No clusters to delete"
+					return m, nil
+				}
+				idx := m.list.Index()
+				if idx >= 0 && idx < len(m.config.Clusters) {
+					// Remove
+					deleted := m.config.Clusters[idx].Alias
+					m.config.Clusters = append(m.config.Clusters[:idx], m.config.Clusters[idx+1:]...)
+					m.status = fmt.Sprintf("Deleted '%s'", deleted)
+
+					// Save immediately using shared helper
+					if err := saveConfigToFile(m.path, m.config); err != nil {
+						m.err = err
+					}
+					// Update list items
+					items := make([]list.Item, len(m.config.Clusters))
+					for i, c := range m.config.Clusters {
+						items[i] = clusterItem{c}
+					}
+					m.list.SetItems(items)
+					return m, nil
+				}
+			}
+
+			if msg.String() == "enter" {
+				// Edit not implemented yet, just show status
+				m.status = "Edit feature coming in v2.2.0"
 				return m, nil
 			}
-			idx := m.list.Index()
-			if idx >= 0 && idx < len(m.config.Clusters) {
-				// Remove
-				deleted := m.config.Clusters[idx].Alias
-				m.config.Clusters = append(m.config.Clusters[:idx], m.config.Clusters[idx+1:]...)
-				m.status = fmt.Sprintf("Deleted '%s'", deleted)
-				return m, m.cmdSaveConfig
+
+		case tea.WindowSizeMsg:
+			h, v := docStyle.GetFrameSize()
+			m.list.SetSize(msg.Width-h, msg.Height-v)
+		}
+
+		m.list, cmd = m.list.Update(msg)
+		return m, cmd
+
+	case viewAddForm:
+		// Explicitly handle ESC to ensure user can back out
+		if msg, ok := msg.(tea.KeyMsg); ok {
+			if msg.Type == tea.KeyEsc {
+				m.view = viewList
+				m.status = "Cancelled"
+				return m, nil
 			}
 		}
 
-		if msg.String() == "enter" {
-			// Edit not implemented yet, just show status
-			m.status = "Edit feature coming in v2.2.0"
-			return m, nil
+		// Update Huh Form
+		form, cmd := m.form.Update(msg)
+		if f, ok := form.(*huh.Form); ok {
+			m.form = f
 		}
 
-	case tea.WindowSizeMsg:
-		h, v := docStyle.GetFrameSize()
-		m.list.SetSize(msg.Width-h, msg.Height-v)
-
-	case cmdRunAdd:
-		// Launch kboot cluster add as subprocess
-		exe, err := os.Executable()
-		if err != nil {
-			m.err = err
-			return m, nil
-		}
-		c := exec.Command(exe, "cluster", "add")
-		// tea.ExecProcess handles stdin/stdout/stderr for us
-		return m, tea.ExecProcess(c, func(err error) tea.Msg {
-			if err != nil {
-				return fmt.Errorf("process finished with error: %v", err)
+		if m.form.State == huh.StateCompleted {
+			// Save Data
+			newCluster := Cluster{
+				Alias:   strings.TrimSpace(m.formData.Alias),
+				Name:    strings.TrimSpace(m.formData.ClusterName),
+				Region:  strings.TrimSpace(m.formData.Region),
+				Profile: strings.TrimSpace(m.formData.Profile),
 			}
-			return m.cmdReloadFromDisk()
-		})
+			if newCluster.Region == "" {
+				newCluster.Region = "us-east-1"
+			}
 
-	case cmdReload:
-		m.list.SetItems(msg.items)
-		m.status = "Configuration reloaded"
-		return m, nil
+			m.config.Clusters = append(m.config.Clusters, newCluster)
+			if err := saveConfigToFile(m.path, m.config); err != nil {
+				m.err = err
+			}
 
-	case error:
-		m.err = msg
-		return m, nil
+			// Reload List & Switch back
+			items := make([]list.Item, len(m.config.Clusters))
+			for i, c := range m.config.Clusters {
+				items[i] = clusterItem{c}
+			}
+			m.list.SetItems(items)
+			m.status = fmt.Sprintf("Added '%s'", newCluster.Alias)
+			m.view = viewList
+			return m, nil
+		}
+
+		if m.form.State == huh.StateAborted {
+			m.view = viewList
+			m.status = "Cancelled"
+			return m, nil
+		}
+
+		return m, cmd
 	}
 
-	m.list, cmd = m.list.Update(msg)
-	return m, cmd
-}
-
-func (m *managerModel) cmdReloadFromDisk() tea.Msg {
-	cfg, err := loadConfig(m.path)
-	if err != nil {
-		return err
-	}
-	m.config = cfg // Update internal state
-
-	items := make([]list.Item, len(cfg.Clusters))
-	for i, c := range cfg.Clusters {
-		items[i] = clusterItem{c}
-	}
-	return cmdReload{items}
+	return m, nil
 }
 
 func (m managerModel) View() string {
 	if m.quitting {
 		return ""
+	}
+
+	if m.view == viewAddForm {
+		return docStyle.Render(m.form.View())
 	}
 
 	s := docStyle.Render(m.list.View())
@@ -195,47 +240,6 @@ func (m managerModel) View() string {
 	}
 
 	return s
-}
-
-// Commands
-func (m *managerModel) cmdSaveConfig() tea.Msg {
-	if err := saveConfig(m.path, m.config); err != nil {
-		m.err = err
-		return nil
-	}
-	// Reload items
-	items := make([]list.Item, len(m.config.Clusters))
-	for i, c := range m.config.Clusters {
-		items[i] = clusterItem{c}
-	}
-	return cmdReload{items}
-}
-
-func (m *managerModel) cmdAddCluster() tea.Msg {
-	// Execute the interactive Add function (blocking)
-	// We need to suspend the Tea program to let clusterAdd print to stdout,
-	// technically Tea has Exec methods but clusterAdd is our own function content.
-	// Actually, best way in simple tool:
-	return cmdRunAdd{}
-}
-
-// Custom Messages
-type cmdReload struct {
-	items []list.Item
-}
-type cmdRunAdd struct{}
-
-// Helper to save (extracted from clusterAdd)
-func saveConfig(path string, cfg *Config) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	encoder := yaml.NewEncoder(f)
-	encoder.SetIndent(2)
-	return encoder.Encode(cfg)
 }
 
 // Entry point
