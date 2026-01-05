@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -465,7 +464,13 @@ func runKboot() {
 	fmt.Printf("Loaded configuration with %d clusters\n", len(cfg.Clusters))
 
 	// 2. AWS SSO Authentication
-	if err := ensureSSOLogin(cfg.SSOSession); err != nil {
+	// Use the first cluster's profile to check validity
+	var testProfile string
+	if len(cfg.Clusters) > 0 {
+		testProfile = cfg.Clusters[0].Profile
+	}
+
+	if err := ensureSSOLogin(cfg.SSOSession, testProfile); err != nil {
 		fatal("SSO login failed: %v", err)
 	}
 
@@ -556,51 +561,33 @@ clusters:
 	return &cfg, nil
 }
 
-func ensureSSOLogin(sessionName string) error {
-	home, err := getHomeDir()
-	if err != nil {
-		return err
-	}
-
-	// Check SSO cache
-	ssoCacheDir := filepath.Join(home, ".aws", "sso", "cache")
-	valid := false
-
-	err = filepath.Walk(ssoCacheDir, func(path string, info fs.FileInfo, err error) error {
-		if err != nil {
-			return nil // ignore errors, just skip
-		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".json") {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-
-			// Try to parse as generic cache file with output
-			var cache SSOCache
-			if err := json.Unmarshal(data, &cache); err == nil && cache.ExpiresAt != "" {
-				// Parse time
-				// AWS SSO usually uses ISO8601/RFC3339
-				t, err := time.Parse(time.RFC3339, cache.ExpiresAt)
-				if err == nil {
-					if time.Now().Before(t) {
-						valid = true
-						return filepath.SkipAll // Stop searching
-					}
-				}
-			}
-		}
-		return nil
-	})
-
-	if valid {
-		fmt.Println("✓ AWS SSO session is valid")
+func ensureSSOLogin(sessionName, testProfile string) error {
+	// If no session name is configured, assume standard credentials or environment variables
+	if sessionName == "" {
+		fmt.Println("No sso_session defined in config. Skipping SSO check.")
 		return nil
 	}
 
-	fmt.Printf("! AWS SSO session expired or missing. Logging in to session '%s'...\n", sessionName)
+	// If we have a profile to test with, try check if we are authenticated
+	if testProfile != "" {
+		// Use a quick dry-run call to see if we have valid credentials
+		// aws sts get-caller-identity --profile <profile>
+		// This validates both the SSO token AND the assumption of the profile role
+		cmd := execCommand("aws", "sts", "get-caller-identity", "--profile", testProfile)
+		if err := cmd.Run(); err == nil {
+			fmt.Println("✓ AWS Session is valid")
+			return nil
+		}
+	} else {
+		// If no clusters/profiles configured, we can't easily validated using STS without knowing the proper profile or account.
+		// However, kboot without clusters usually just exits or does nothing interesting.
+		// We could fallback to simple file check, but let's just warn.
+		fmt.Println("! No clusters configured to validate session. Assuming login needed if clusters are added.")
+	}
+
+	fmt.Printf("! AWS Session expired or invalid. Logging in to session '%s'...\n", sessionName)
 	cmd := execCommand("aws", "sso", "login", "--sso-session", sessionName)
-	cmd.Stdin = os.Stdin
+	cmd.Stdin = getInput() // Use mockable input
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
