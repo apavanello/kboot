@@ -591,6 +591,86 @@ clusters:
 	return &cfg, nil
 }
 
+func discoverSessions(clusters []Cluster) (map[string]string, error) {
+	// Map sessionName -> sampleProfile (to use for verification)
+	sessions := make(map[string]string)
+
+	// We need to parse ~/.aws/config to map Profile -> sso_session
+	home, err := getHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	configPath := filepath.Join(home, ".aws", "config")
+
+	f, err := os.Open(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // No config, no sessions
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	// Parse INI manually to find sso_session for each profile
+	// We want to avoid heavy external deps if possible, but map iteration is safe.
+	// Structure:
+	// [profile name]
+	// sso_session = name
+
+	type ProfileData struct {
+		SSOSession string
+	}
+	profileMap := make(map[string]*ProfileData)
+
+	var currentProfile string
+	scanner := bufio.NewScanner(f)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			content := line[1 : len(line)-1]
+			// Check if it is a profile block
+			if strings.HasPrefix(content, "profile ") {
+				currentProfile = strings.TrimSpace(strings.TrimPrefix(content, "profile "))
+				profileMap[currentProfile] = &ProfileData{}
+			} else if content == "default" {
+				currentProfile = "default"
+				profileMap[currentProfile] = &ProfileData{}
+			} else {
+				currentProfile = "" // Reset if entering unrelated block (e.g. sso-session block)
+			}
+			continue
+		}
+
+		if currentProfile != "" {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				val := strings.TrimSpace(parts[1])
+				if key == "sso_session" {
+					if pData, ok := profileMap[currentProfile]; ok {
+						pData.SSOSession = val
+					}
+				}
+			}
+		}
+	}
+
+	// Now match clusters to found sessions
+	for _, c := range clusters {
+		if pData, ok := profileMap[c.Profile]; ok && pData.SSOSession != "" {
+			// Save this session to be validated, using this profile as the tester
+			sessions[pData.SSOSession] = c.Profile
+		}
+	}
+
+	return sessions, nil
+}
+
 func ensureSSOLogin(sessionName, testProfile string) error {
 	// If no session name is configured, assume standard credentials or environment variables
 	if sessionName == "" {
