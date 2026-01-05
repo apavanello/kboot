@@ -26,7 +26,7 @@ var (
 
 // Config represents the ~/.kboot.yaml structure
 type Config struct {
-	SSOSession string    `yaml:"sso_session"`
+	SSOSession string    `yaml:"sso_session,omitempty"`
 	Clusters   []Cluster `yaml:"clusters"`
 }
 
@@ -186,13 +186,8 @@ func clusterAdd() {
 	profiles, _ := listAWSProfiles()
 	if len(profiles) > 0 {
 		fmt.Println("Available Profiles:")
-		for i, p := range profiles {
-			fmt.Printf(" - %s", p)
-			if (i+1)%5 == 0 {
-				fmt.Println()
-			} else {
-				fmt.Print("   ")
-			}
+		for _, p := range profiles {
+			fmt.Printf(" - %s\n", p)
 		}
 		fmt.Println()
 	} else {
@@ -567,17 +562,13 @@ func loadConfig(path string) (*Config, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Auto-create default
-			defaultConfig := `sso_session: my-sso
-clusters:
-  - alias: demo
-    profile: default
-    region: us-east-1
-    name: my-cluster
+			defaultConfig := `clusters: []
+# Use 'kboot cluster add' to configure your first cluster
 `
 			if createErr := os.WriteFile(path, []byte(defaultConfig), 0644); createErr != nil {
 				return nil, fmt.Errorf("config not found and failed to create default at %s: %v", path, createErr)
 			}
-			fmt.Printf("! Config not found. Created default at %s. Please edit it.\n", path)
+			fmt.Printf("! Config not found. Created default at %s. Please edit it or run 'kboot cluster add'.\n", path)
 			// Read again
 			data = []byte(defaultConfig)
 		} else {
