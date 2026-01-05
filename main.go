@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"gopkg.in/yaml.v3"
 )
 
@@ -104,6 +105,9 @@ func main() {
 		case "cluster":
 			handleClusterCommand(os.Args[2:])
 			return
+		case "config":
+			runManager()
+			return
 		case "help", "--help", "-h":
 			printHelp()
 			return
@@ -114,14 +118,15 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Println("kboot - DevOps CLI for EKS & AWS Auth Management (v1.6.0)")
+	fmt.Println("kboot - DevOps CLI for EKS & AWS Auth Management (v2.0.0)")
 	fmt.Println("\nUsage: kboot [command]")
 	fmt.Println("\nCommands:")
 	fmt.Println("  auth       Manage AWS credentials and SSO configurations")
 	fmt.Println("    new      Interactive setup (backup + clean init)")
-	fmt.Println("    add      Interactive addition of profiles")
+	fmt.Println("    add      Interactive addition of profiles (TUI)")
 	fmt.Println("  cluster    Manage cluster configurations")
-	fmt.Println("    add      Interactive addition of a cluster to ~/.kboot.yaml")
+	fmt.Println("    add      Interactive addition of a cluster to ~/.kboot.yaml (TUI)")
+	fmt.Println("  config     Manage configurations (TUI Dashboard) [New]")
 	fmt.Println("\n  (empty)    Sync clusters defined in ~/.kboot.yaml and launch k9s")
 	fmt.Println("\nFlags:")
 	fmt.Println("  -h, --help Show this help message")
@@ -179,39 +184,74 @@ func printClusterHelp() {
 // --- Cluster Features ---
 
 func clusterAdd() {
-	reader := bufio.NewReader(getInput())
+	var (
+		alias       string
+		clusterName string
+		region      string
+		profile     string
+	)
 
-	// 1. Load AWS Profiles
+	// 1. Load AWS Profiles for Select List
 	fmt.Println("Discovering AWS Profiles...")
 	profiles, _ := listAWSProfiles()
+
+	// Create options
+	var profileOptions []huh.Option[string]
 	if len(profiles) > 0 {
-		fmt.Println("Available Profiles:")
 		for _, p := range profiles {
-			fmt.Printf(" - %s\n", p)
+			profileOptions = append(profileOptions, huh.NewOption(p, p))
 		}
-		fmt.Println()
 	} else {
-		fmt.Println("No profiles found in ~/.aws/credentials or ~/.aws/config")
+		profileOptions = append(profileOptions, huh.NewOption("default (No profiles found)", "default"))
 	}
 
-	// 2. Prompts
-	fmt.Print("\nAlias (short name for display): ")
-	alias, _ := reader.ReadString('\n')
+	// 2. Form
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Cluster Alias").
+				Description("Short name for display in k9s/kboot").
+				Value(&alias).
+				Validate(func(str string) error {
+					if strings.TrimSpace(str) == "" {
+						return fmt.Errorf("alias cannot be empty")
+					}
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("Real Cluster Name").
+				Description("Exact name in AWS EKS").
+				Value(&clusterName).
+				Validate(func(str string) error {
+					if strings.TrimSpace(str) == "" {
+						return fmt.Errorf("cluster name cannot be empty")
+					}
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("AWS Region").
+				Value(&region).
+				Suggestions([]string{"us-east-1", "us-west-2", "eu-west-1", "sa-east-1"}), // Helpful suggestions
+
+			huh.NewSelect[string]().
+				Title("AWS Profile").
+				Options(profileOptions...).
+				Value(&profile),
+		),
+	)
+
+	if err := form.Run(); err != nil {
+		fatal("Cancelled")
+	}
+
 	alias = strings.TrimSpace(alias)
-
-	fmt.Print("Real Cluster Name (AWS EKS Name): ")
-	clusterName, _ := reader.ReadString('\n')
 	clusterName = strings.TrimSpace(clusterName)
-
-	fmt.Print("Region (default: us-east-1): ")
-	region, _ := reader.ReadString('\n')
 	region = strings.TrimSpace(region)
 	if region == "" {
 		region = "us-east-1"
 	}
-
-	fmt.Print("AWS Profile Name: ")
-	profile, _ := reader.ReadString('\n')
 	profile = strings.TrimSpace(profile)
 
 	// 3. Save
@@ -292,14 +332,27 @@ func listAWSProfiles() ([]string, error) {
 
 // --- Auth Features ---
 
+// --- Auth Features ---
+
 func authNew() {
-	reader := bufio.NewReader(getInput())
-	fmt.Println("Do you want to setup:")
-	fmt.Println(" [1] Static Credentials (~/.aws/credentials)")
-	fmt.Println(" [2] SSO Profiles (~/.aws/config)")
-	fmt.Print("Choice: ")
-	choice, _ := reader.ReadString('\n')
-	choice = strings.TrimSpace(choice)
+	var choice string
+
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Do you want to setup:").
+				Options(
+					huh.NewOption("Static Credentials (~/.aws/credentials)", "1"),
+					huh.NewOption("SSO Profiles (~/.aws/config)", "2"),
+				).
+				Value(&choice),
+		),
+	)
+
+	err := form.Run()
+	if err != nil {
+		fatal("Auth cancelled: %v", err)
+	}
 
 	home, err := getHomeDir()
 	if err != nil {
@@ -339,38 +392,87 @@ func authNew() {
 }
 
 func authAdd() {
-	reader := bufio.NewReader(getInput())
-	fmt.Println("Which type of credential to add?")
-	fmt.Println(" [1] Static Credentials (key/secret)")
-	fmt.Println(" [2] SSO Profile")
-	fmt.Print("Choice: ")
-	choice, _ := reader.ReadString('\n')
-	choice = strings.TrimSpace(choice)
+	var choice string
+
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Which type of credential to add?").
+				Options(
+					huh.NewOption("Static Credentials (key/secret)", "1"),
+					huh.NewOption("SSO Profile", "2"),
+				).
+				Value(&choice),
+		),
+	)
+
+	if err := form.Run(); err != nil {
+		fatal("Cancelled: %v", err)
+	}
 
 	if choice == "1" {
-		addStaticCredential(reader)
+		addStaticCredential()
 	} else if choice == "2" {
-		addSSOProfile(reader)
+		addSSOProfile()
 	} else {
 		fatal("Invalid choice")
 	}
 }
 
-func addStaticCredential(reader *bufio.Reader) {
-	fmt.Print("Profile Name: ")
-	profile, _ := reader.ReadString('\n')
+func addStaticCredential() {
+	var (
+		profile string
+		key     string
+		secret  string
+		token   string
+	)
+
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Profile Name").
+				Value(&profile).
+				Validate(func(str string) error {
+					if strings.TrimSpace(str) == "" {
+						return fmt.Errorf("profile name cannot be empty")
+					}
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("AWS Access Key ID").
+				Value(&key).
+				Validate(func(str string) error {
+					if strings.TrimSpace(str) == "" {
+						return fmt.Errorf("access key cannot be empty")
+					}
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("AWS Secret Access Key").
+				Password(true).
+				Value(&secret).
+				Validate(func(str string) error {
+					if strings.TrimSpace(str) == "" {
+						return fmt.Errorf("secret key cannot be empty")
+					}
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("AWS Session Token (optional)").
+				Value(&token),
+		),
+	)
+
+	if err := form.Run(); err != nil {
+		fatal("Cancelled")
+	}
+
 	profile = strings.TrimSpace(profile)
-
-	fmt.Print("AWS Access Key ID: ")
-	key, _ := reader.ReadString('\n')
 	key = strings.TrimSpace(key)
-
-	fmt.Print("AWS Secret Access Key: ")
-	secret, _ := reader.ReadString('\n')
 	secret = strings.TrimSpace(secret)
-
-	fmt.Print("AWS Session Token (optional, press enter to skip): ")
-	token, _ := reader.ReadString('\n')
 	token = strings.TrimSpace(token)
 
 	content := fmt.Sprintf("\n[%s]\naws_access_key_id = %s\naws_secret_access_key = %s\n", profile, key, secret)
@@ -384,32 +486,87 @@ func addStaticCredential(reader *bufio.Reader) {
 	fmt.Printf("Added profile [%s] to %s\n", profile, path)
 }
 
-func addSSOProfile(reader *bufio.Reader) {
-	fmt.Print("Profile Name: ")
-	profile, _ := reader.ReadString('\n')
-	profile = strings.TrimSpace(profile)
+func addSSOProfile() {
+	var (
+		profile     string
+		sessionName string = "my-sso"
+		url         string
+		region      string
+		accId       string
+		roleName    string
+	)
 
-	fmt.Print("SSO Session Name (default: my-sso): ")
-	sessionName, _ := reader.ReadString('\n')
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Profile Name").
+				Value(&profile).
+				Validate(func(str string) error {
+					if strings.TrimSpace(str) == "" {
+						return fmt.Errorf("profile name cannot be empty")
+					}
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("SSO Session Name").
+				Description("Default: my-sso").
+				Value(&sessionName),
+
+			huh.NewInput().
+				Title("SSO Start URL").
+				Value(&url).
+				Validate(func(str string) error {
+					if strings.TrimSpace(str) == "" {
+						return fmt.Errorf("URL cannot be empty")
+					}
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("SSO Region").
+				Value(&region).
+				Validate(func(str string) error {
+					if strings.TrimSpace(str) == "" {
+						return fmt.Errorf("region cannot be empty")
+					}
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("SSO Account ID").
+				Value(&accId).
+				Validate(func(str string) error {
+					if strings.TrimSpace(str) == "" {
+						return fmt.Errorf("Account ID cannot be empty")
+					}
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("SSO Role Name").
+				Value(&roleName).
+				Validate(func(str string) error {
+					if strings.TrimSpace(str) == "" {
+						return fmt.Errorf("Role Name cannot be empty")
+					}
+					return nil
+				}),
+		),
+	)
+
+	if err := form.Run(); err != nil {
+		fatal("Cancelled")
+	}
+
+	profile = strings.TrimSpace(profile)
 	sessionName = strings.TrimSpace(sessionName)
 	if sessionName == "" {
 		sessionName = "my-sso"
 	}
-
-	fmt.Print("SSO Start URL: ")
-	url, _ := reader.ReadString('\n')
 	url = strings.TrimSpace(url)
-
-	fmt.Print("SSO Region: ")
-	region, _ := reader.ReadString('\n')
 	region = strings.TrimSpace(region)
-
-	fmt.Print("SSO Account ID: ")
-	accId, _ := reader.ReadString('\n')
 	accId = strings.TrimSpace(accId)
-
-	fmt.Print("SSO Role Name: ")
-	roleName, _ := reader.ReadString('\n')
 	roleName = strings.TrimSpace(roleName)
 
 	home, _ := getHomeDir()
@@ -419,8 +576,6 @@ func addSSOProfile(reader *bufio.Reader) {
 	content, err := os.ReadFile(configPath)
 	if err == nil {
 		strContent := string(content)
-		// Simple check if [sso-session name] exists
-		// In a real generic parser we'd be more careful, but strict string check is mostly fine for appended files
 		if !strings.Contains(strContent, fmt.Sprintf("[sso-session %s]", sessionName)) {
 			fmt.Printf("Creating new [sso-session %s] block...\n", sessionName)
 			sessionBlock := fmt.Sprintf("\n[sso-session %s]\nsso_start_url = %s\nsso_region = %s\nsso_registration_scopes = sso:account:access\n", sessionName, url, region)
@@ -436,7 +591,6 @@ func addSSOProfile(reader *bufio.Reader) {
 	}
 
 	// 2. Add Profile linking to session
-	// Note: We DO NOT use sso_start_url/region here, we use sso_session!
 	profileBlock := fmt.Sprintf("\n[profile %s]\nsso_session = %s\nsso_account_id = %s\nsso_role_name = %s\n", profile, sessionName, accId, roleName)
 
 	appendToFile(configPath, profileBlock)
