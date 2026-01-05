@@ -376,7 +376,24 @@ func getConfigPath() (string, error) {
 func loadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		if os.IsNotExist(err) {
+			// Auto-create default
+			defaultConfig := `sso_session: my-sso
+clusters:
+  - alias: demo
+    profile: default
+    region: us-east-1
+    name: my-cluster
+`
+			if createErr := os.WriteFile(path, []byte(defaultConfig), 0644); createErr != nil {
+				return nil, fmt.Errorf("config not found and failed to create default at %s: %v", path, createErr)
+			}
+			fmt.Printf("! Config not found. Created default at %s. Please edit it.\n", path)
+			// Read again
+			data = []byte(defaultConfig)
+		} else {
+			return nil, err
+		}
 	}
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
