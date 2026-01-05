@@ -4,11 +4,12 @@
 
 ## Funcionalidades
 
-- **Autenticação Inteligente**: Verifica se sua sessão AWS SSO é válida em `~/.aws/sso/cache`. Se expirada, executa `aws sso login` automaticamente.
-- **Sincronização Paralela**: Busca detalhes dos clusters e gera kubeconfigs para múltiplos clusters simultaneamente usando Goroutines.
-- **Aliasing de Contexto**: Mapeia ARNs complexos da AWS para apelidos curtos e amigáveis (ex: `prod`, `staging`) para seus contextos Kubernetes.
-- **Zero Poluição**: **Não** modifica seu `~/.kube/config` principal. Gera arquivos temporários e define a variável de ambiente `KUBECONFIG` apenas para a sessão atual.
-- **Multi-plataforma**: Funciona em Windows, Linux e macOS.
+- **Dashboard TUI Unificado** (v2.3.0): Gerencie clusters e credenciais AWS de uma única interface de terminal intuitiva
+- **Autenticação Inteligente**: Verifica se sua sessão AWS SSO é válida. Se expirada, executa `aws sso login` automaticamente
+- **Sincronização Paralela**: Busca detalhes dos clusters e gera kubeconfigs para múltiplos clusters simultaneamente
+- **Aliasing de Contexto**: Mapeia ARNs complexos da AWS para apelidos curtos e amigáveis (ex: `prod`, `staging`)
+- **Zero Poluição**: **Não** modifica seu `~/.kube/config` principal. Gera configs temporários apenas para a sessão
+- **Multi-plataforma**: Funciona em Windows, Linux e macOS
 
 ## Instalação
 
@@ -24,35 +25,53 @@ cd kboot
 go build -o kboot .
 ```
 
+## Uso
+
+### Iniciar k9s com todos os clusters
+```bash
+./kboot
+```
+Sincroniza todos os clusters configurados e abre o k9s.
+
+### Dashboard de Configuração (TUI)
+```bash
+./kboot config
+```
+Abre o dashboard unificado de gerenciamento onde você pode:
+
+**Gerenciar Clusters:**
+- `a` - Adicionar novo cluster
+- `e` / `Enter` - Editar cluster selecionado
+- `c` - Duplicar cluster selecionado
+- `d` - Deletar cluster selecionado
+
+**Gerenciar Credenciais AWS:**
+- Credenciais estáticas (`~/.aws/credentials`)
+- Perfis SSO (`~/.aws/config`)
+
+**Navegação:**
+- `Tab` / `Shift+Tab` - Navegar campos do formulário
+- `Esc` - Voltar / Cancelar
+- `q` - Sair
+
 ## Configuração
 
-Crie um arquivo de configuração em `~/.kboot.yaml`:
+Os clusters são armazenados em `~/.kboot.yaml`:
 
 ```yaml
-sso_session: "minha-sessao-sso" # Deve coincidir com o nome da sessão no ~/.aws/config
+sso_session: "minha-sessao-sso"
 clusters:
-  - alias: "prod"         # Nome curto para o contexto (ex: exibido no k9s)
-    profile: "aws-prod"   # Profile AWS do ~/.aws/config
+  - alias: "prod"
+    profile: "aws-prod"
     region: "us-east-1"
-    name: "eks-cluster-production" # Nome real do cluster EKS
+    name: "eks-cluster-production"
   - alias: "staging"
     profile: "aws-staging"
     region: "us-east-1"
     name: "eks-cluster-staging"
 ```
 
-## Uso
-
-Simplesmente execute o binário:
-
-```bash
-./kboot
-```
-
-A ferramenta irá:
-1. Garantir que você está logado no AWS SSO.
-2. Gerar kubeconfigs para `prod` e `staging` em um diretório temporário.
-3. Iniciar o `k9s` com acesso a ambos os clusters.
+Você também pode gerenciar este arquivo através da TUI com `kboot config`.
 
 ## Licença
 
