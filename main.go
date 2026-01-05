@@ -96,15 +96,9 @@ type KEnv struct {
 }
 
 func main() {
-	// 1. configuration
+	// 1. Check for commands
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "auth":
-			handleAuthCommand(os.Args[2:])
-			return
-		case "cluster":
-			handleClusterCommand(os.Args[2:])
-			return
 		case "config":
 			runManager()
 			return
@@ -118,18 +112,13 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Println("kboot - DevOps CLI for EKS & AWS Auth Management (v2.0.0)")
+	fmt.Println("kboot - DevOps CLI for EKS & AWS Auth Management (v2.3.0)")
 	fmt.Println("\nUsage: kboot [command]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  auth       Manage AWS credentials and SSO configurations")
-	fmt.Println("    new      Interactive setup (backup + clean init)")
-	fmt.Println("    add      Interactive addition of profiles (TUI)")
-	fmt.Println("  cluster    Manage cluster configurations")
-	fmt.Println("    add      Interactive addition of a cluster to ~/.kboot.yaml (TUI)")
-	fmt.Println("  config     Manage configurations (TUI Dashboard) [New]")
-	fmt.Println("\n  (empty)    Sync clusters defined in ~/.kboot.yaml and launch k9s")
+	fmt.Println("  config     Dashboard TUI para gerenciar clusters e credenciais AWS")
+	fmt.Println("\n  (vazio)    Sincroniza clusters do ~/.kboot.yaml e inicia o k9s")
 	fmt.Println("\nFlags:")
-	fmt.Println("  -h, --help Show this help message")
+	fmt.Println("  -h, --help Mostra esta mensagem de ajuda")
 }
 
 func handleAuthCommand(args []string) {
@@ -237,6 +226,10 @@ func newClusterForm(data *ClusterConfig) *huh.Form {
 				Title("AWS Profile").
 				Options(profileOptions...).
 				Value(&data.Profile),
+
+			huh.NewNote().
+				Title("Navegação").
+				Description("Tab → próximo | Shift+Tab → anterior | Enter → confirmar | Esc → cancelar"),
 		),
 	)
 }
@@ -322,6 +315,10 @@ func listAWSProfiles() ([]string, error) {
 			line := strings.TrimSpace(scanner.Text())
 			if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 				content := line[1 : len(line)-1]
+				// Skip sso-session entries (they are not profiles)
+				if strings.HasPrefix(content, "sso-session ") {
+					continue
+				}
 				if isConfig {
 					// .aws/config uses [profile name] or [default]
 					content = strings.TrimPrefix(content, "profile ")
