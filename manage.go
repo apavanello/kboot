@@ -30,12 +30,15 @@ const (
 	viewClusterList
 	viewClusterAddForm
 	viewClusterEditForm
+	viewClusterDeleteConfirm
 	viewStaticCredsList
 	viewStaticAddForm
 	viewStaticEditForm
+	viewStaticDeleteConfirm
 	viewSSOProfilesList
 	viewSSOAddForm
 	viewSSOEditForm
+	viewSSODeleteConfirm
 )
 
 // Menu items
@@ -115,6 +118,11 @@ type managerModel struct {
 	staticCreds  []credentialItem
 	ssoProfiles  []credentialItem
 	authEditIdx  int
+
+	// Delete confirmation
+	pendingDeleteIdx  int
+	pendingDeleteName string
+	confirmDelete     *bool // Pointer to survive value copy in Update
 
 	err      error
 	status   string
@@ -442,16 +450,21 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				idx := m.list.Index()
 				if idx >= 0 && idx < len(m.config.Clusters) {
-					deleted := m.config.Clusters[idx].Alias
-					m.config.Clusters = append(m.config.Clusters[:idx], m.config.Clusters[idx+1:]...)
-					m.status = fmt.Sprintf("Deletado '%s'", deleted)
-					saveConfigToFile(m.path, m.config)
-					items := make([]list.Item, len(m.config.Clusters))
-					for i, c := range m.config.Clusters {
-						items[i] = clusterItem{c}
-					}
-					m.list.SetItems(items)
-					return m, nil
+					m.pendingDeleteIdx = idx
+					m.pendingDeleteName = m.config.Clusters[idx].Alias
+					val := false
+					m.confirmDelete = &val
+					m.form = huh.NewForm(
+						huh.NewGroup(
+							huh.NewConfirm().
+								Title(fmt.Sprintf("Deletar cluster '%s'?", m.pendingDeleteName)).
+								Affirmative("Sim, deletar").
+								Negative("Cancelar").
+								Value(m.confirmDelete),
+						),
+					)
+					m.view = viewClusterDeleteConfirm
+					return m, m.form.Init()
 				}
 			}
 
@@ -553,6 +566,38 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, cmd
 
+	case viewClusterDeleteConfirm:
+		form, cmd := m.form.Update(msg)
+		if f, ok := form.(*huh.Form); ok {
+			m.form = f
+		}
+
+		if m.form.State == huh.StateCompleted {
+			if *m.confirmDelete {
+				// Actually delete
+				m.config.Clusters = append(m.config.Clusters[:m.pendingDeleteIdx], m.config.Clusters[m.pendingDeleteIdx+1:]...)
+				m.status = fmt.Sprintf("Deletado '%s'", m.pendingDeleteName)
+				saveConfigToFile(m.path, m.config)
+				items := make([]list.Item, len(m.config.Clusters))
+				for i, c := range m.config.Clusters {
+					items[i] = clusterItem{c}
+				}
+				m.list.SetItems(items)
+			} else {
+				m.status = "Cancelado"
+			}
+			m.view = viewClusterList
+			return m, nil
+		}
+
+		if m.form.State == huh.StateAborted {
+			m.view = viewClusterList
+			m.status = "Cancelado"
+			return m, nil
+		}
+
+		return m, cmd
+
 	case viewStaticCredsList:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
@@ -577,19 +622,21 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				idx := m.credList.Index()
 				if idx >= 0 && idx < len(m.staticCreds) {
-					profileName := m.staticCreds[idx].ProfileName
-					if deleteStaticCredential(profileName) {
-						m.status = fmt.Sprintf("Deletado '%s'", profileName)
-						m.staticCreds = loadStaticCredentials()
-						items := make([]list.Item, len(m.staticCreds))
-						for i, c := range m.staticCreds {
-							items[i] = c
-						}
-						m.credList.SetItems(items)
-					} else {
-						m.status = "Erro ao deletar credencial"
-					}
-					return m, nil
+					m.pendingDeleteIdx = idx
+					m.pendingDeleteName = m.staticCreds[idx].ProfileName
+					val := false
+					m.confirmDelete = &val
+					m.form = huh.NewForm(
+						huh.NewGroup(
+							huh.NewConfirm().
+								Title(fmt.Sprintf("Deletar credencial '%s'?", m.pendingDeleteName)).
+								Affirmative("Sim, deletar").
+								Negative("Cancelar").
+								Value(m.confirmDelete),
+						),
+					)
+					m.view = viewStaticDeleteConfirm
+					return m, m.form.Init()
 				}
 			}
 
@@ -698,6 +745,41 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, cmd
 
+	case viewStaticDeleteConfirm:
+		form, cmd := m.form.Update(msg)
+		if f, ok := form.(*huh.Form); ok {
+			m.form = f
+		}
+
+		if m.form.State == huh.StateCompleted {
+			if *m.confirmDelete {
+				profileName := m.staticCreds[m.pendingDeleteIdx].ProfileName
+				if deleteStaticCredential(profileName) {
+					m.status = fmt.Sprintf("Deletado '%s'", profileName)
+					m.staticCreds = loadStaticCredentials()
+					items := make([]list.Item, len(m.staticCreds))
+					for i, c := range m.staticCreds {
+						items[i] = c
+					}
+					m.credList.SetItems(items)
+				} else {
+					m.status = "Erro ao deletar credencial"
+				}
+			} else {
+				m.status = "Cancelado"
+			}
+			m.view = viewStaticCredsList
+			return m, nil
+		}
+
+		if m.form.State == huh.StateAborted {
+			m.view = viewStaticCredsList
+			m.status = "Cancelado"
+			return m, nil
+		}
+
+		return m, cmd
+
 	case viewSSOProfilesList:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
@@ -722,19 +804,21 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				idx := m.credList.Index()
 				if idx >= 0 && idx < len(m.ssoProfiles) {
-					profileName := m.ssoProfiles[idx].ProfileName
-					if deleteSSOProfile(profileName) {
-						m.status = fmt.Sprintf("Deletado '%s'", profileName)
-						m.ssoProfiles = loadSSOProfiles()
-						items := make([]list.Item, len(m.ssoProfiles))
-						for i, c := range m.ssoProfiles {
-							items[i] = c
-						}
-						m.credList.SetItems(items)
-					} else {
-						m.status = "Erro ao deletar perfil"
-					}
-					return m, nil
+					m.pendingDeleteIdx = idx
+					m.pendingDeleteName = m.ssoProfiles[idx].ProfileName
+					val := false
+					m.confirmDelete = &val
+					m.form = huh.NewForm(
+						huh.NewGroup(
+							huh.NewConfirm().
+								Title(fmt.Sprintf("Deletar perfil SSO '%s'?", m.pendingDeleteName)).
+								Affirmative("Sim, deletar").
+								Negative("Cancelar").
+								Value(m.confirmDelete),
+						),
+					)
+					m.view = viewSSODeleteConfirm
+					return m, m.form.Init()
 				}
 			}
 
@@ -861,6 +945,41 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return m, cmd
+
+	case viewSSODeleteConfirm:
+		form, cmd := m.form.Update(msg)
+		if f, ok := form.(*huh.Form); ok {
+			m.form = f
+		}
+
+		if m.form.State == huh.StateCompleted {
+			if *m.confirmDelete {
+				profileName := m.ssoProfiles[m.pendingDeleteIdx].ProfileName
+				if deleteSSOProfile(profileName) {
+					m.status = fmt.Sprintf("Deletado '%s'", profileName)
+					m.ssoProfiles = loadSSOProfiles()
+					items := make([]list.Item, len(m.ssoProfiles))
+					for i, c := range m.ssoProfiles {
+						items[i] = c
+					}
+					m.credList.SetItems(items)
+				} else {
+					m.status = "Erro ao deletar perfil"
+				}
+			} else {
+				m.status = "Cancelado"
+			}
+			m.view = viewSSOProfilesList
+			return m, nil
+		}
+
+		if m.form.State == huh.StateAborted {
+			m.view = viewSSOProfilesList
+			m.status = "Cancelado"
+			return m, nil
+		}
+
+		return m, cmd
 	}
 
 	return m, nil
@@ -904,6 +1023,15 @@ func (m managerModel) View() string {
 		content = docStyle.Render(m.form.View())
 	case viewSSOEditForm:
 		title = "Editar Perfil SSO"
+		content = docStyle.Render(m.form.View())
+	case viewClusterDeleteConfirm:
+		title = "Confirmar Exclusão"
+		content = docStyle.Render(m.form.View())
+	case viewStaticDeleteConfirm:
+		title = "Confirmar Exclusão"
+		content = docStyle.Render(m.form.View())
+	case viewSSODeleteConfirm:
+		title = "Confirmar Exclusão"
 		content = docStyle.Render(m.form.View())
 	default:
 		title = "Kboot"
