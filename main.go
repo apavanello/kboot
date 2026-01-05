@@ -394,6 +394,13 @@ func addSSOProfile(reader *bufio.Reader) {
 	profile, _ := reader.ReadString('\n')
 	profile = strings.TrimSpace(profile)
 
+	fmt.Print("SSO Session Name (default: my-sso): ")
+	sessionName, _ := reader.ReadString('\n')
+	sessionName = strings.TrimSpace(sessionName)
+	if sessionName == "" {
+		sessionName = "my-sso"
+	}
+
 	fmt.Print("SSO Start URL: ")
 	url, _ := reader.ReadString('\n')
 	url = strings.TrimSpace(url)
@@ -410,12 +417,35 @@ func addSSOProfile(reader *bufio.Reader) {
 	roleName, _ := reader.ReadString('\n')
 	roleName = strings.TrimSpace(roleName)
 
-	content := fmt.Sprintf("\n[profile %s]\nsso_start_url = %s\nsso_region = %s\nsso_account_id = %s\nsso_role_name = %s\n", profile, url, region, accId, roleName)
-
 	home, _ := getHomeDir()
-	path := filepath.Join(home, ".aws", "config")
-	appendToFile(path, content)
-	fmt.Printf("Added profile [%s] to %s\n", profile, path)
+	configPath := filepath.Join(home, ".aws", "config")
+
+	// 1. Ensure [sso-session <sessionName>] exists
+	content, err := os.ReadFile(configPath)
+	if err == nil {
+		strContent := string(content)
+		// Simple check if [sso-session name] exists
+		// In a real generic parser we'd be more careful, but strict string check is mostly fine for appended files
+		if !strings.Contains(strContent, fmt.Sprintf("[sso-session %s]", sessionName)) {
+			fmt.Printf("Creating new [sso-session %s] block...\n", sessionName)
+			sessionBlock := fmt.Sprintf("\n[sso-session %s]\nsso_start_url = %s\nsso_region = %s\nsso_registration_scopes = sso:account:access\n", sessionName, url, region)
+			appendToFile(configPath, sessionBlock)
+		} else {
+			fmt.Printf("Using existing [sso-session %s] block.\n", sessionName)
+		}
+	} else {
+		// New file
+		fmt.Printf("Creating new config file with [sso-session %s]...\n", sessionName)
+		sessionBlock := fmt.Sprintf("[sso-session %s]\nsso_start_url = %s\nsso_region = %s\nsso_registration_scopes = sso:account:access\n", sessionName, url, region)
+		appendToFile(configPath, sessionBlock)
+	}
+
+	// 2. Add Profile linking to session
+	// Note: We DO NOT use sso_start_url/region here, we use sso_session!
+	profileBlock := fmt.Sprintf("\n[profile %s]\nsso_session = %s\nsso_account_id = %s\nsso_role_name = %s\n", profile, sessionName, accId, roleName)
+
+	appendToFile(configPath, profileBlock)
+	fmt.Printf("Added profile [%s] to %s\n", profile, configPath)
 }
 
 func copyFile(src, dst string) error {

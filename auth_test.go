@@ -84,14 +84,19 @@ func TestAuthNew_Static(t *testing.T) {
 	}
 }
 
-func TestAuthAdd_Static(t *testing.T) {
+func TestAuthAdd_SSO(t *testing.T) {
 	tempHome := mockHomeDir(t)
-	// Input: "1" for choice, then "myprofile", "starturl", "region", "accid", "role"
-	// Wait, choice 1 is Static: Profile, Key, Secret, Token (optional)
-	// Input: "1\n" (Choice), "test-profile\n" (Name), "AKIATEST\n" (Key), "SECRET123\n" (Secret), "\n" (Token skip)
-	mockInput(t, "1\ntest-profile\nAKIATEST\nSECRET123\n\n")
+	// Input: "2" (SSO)
+	// Prompts:
+	// 1. Profile Name: "dev-profile"
+	// 2. Session Name: "dev-sso"
+	// 3. URL: "https://d-123.awsapps.com/start"
+	// 4. Region: "us-east-1"
+	// 5. Account: "111122223333"
+	// 6. Role: "DevRole"
+	mockInput(t, "2\ndev-profile\ndev-sso\nhttps://d-123.awsapps.com/start\nus-east-1\n111122223333\nDevRole\n")
 
-	// Capture stdout
+	// Capture output
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -103,19 +108,31 @@ func TestAuthAdd_Static(t *testing.T) {
 	io.Copy(io.Discard, r) // drain
 
 	// Verify file content
-	credsPath := filepath.Join(tempHome, ".aws", "credentials")
-	content, err := os.ReadFile(credsPath)
+	configPath := filepath.Join(tempHome, ".aws", "config")
+	content, err := os.ReadFile(configPath)
 	if err != nil {
-		t.Fatalf("Failed to read credentials: %v", err)
+		t.Fatalf("Failed to read config: %v", err)
 	}
 
 	strContent := string(content)
-	if !strings.Contains(strContent, "[test-profile]") {
-		t.Error("Expected [test-profile] in credentials")
+
+	// Check Session Block
+	if !strings.Contains(strContent, "[sso-session dev-sso]") {
+		t.Error("Expected [sso-session dev-sso] block")
 	}
-	if !strings.Contains(strContent, "aws_access_key_id = AKIATEST") {
-		t.Error("Expected Access Key in credentials")
+	if !strings.Contains(strContent, "sso_start_url = https://d-123.awsapps.com/start") {
+		t.Error("Expected URL in session block")
 	}
+
+	// Check Profile Block linking to session
+	if !strings.Contains(strContent, "[profile dev-profile]") {
+		t.Error("Expected [profile dev-profile] block")
+	}
+	if !strings.Contains(strContent, "sso_session = dev-sso") {
+		t.Error("Expected profile to link to sso_session")
+	}
+	// Profile should NOT have url or region directly if using session
+	// (Actually, check that profile BLOCK doesn't have it? Hard with simple strings contains, but good enough for now)
 }
 
 func TestClusterAdd(t *testing.T) {
