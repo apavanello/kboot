@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -89,6 +91,212 @@ type KEnv struct {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "auth":
+			handleAuthCommand(os.Args[2:])
+			return
+		case "help", "--help", "-h":
+			printHelp()
+			return
+		}
+	}
+	// Default behavior: boot logic
+	runKboot()
+}
+
+func printHelp() {
+	fmt.Println("kboot - DevOps CLI for EKS & AWS Auth Management (v1.5.0)")
+	fmt.Println("\nUsage: kboot [command]")
+	fmt.Println("\nCommands:")
+	fmt.Println("  auth       Manage AWS credentials and SSO configurations")
+	fmt.Println("    new      Interactive setup (backup + clean init)")
+	fmt.Println("    add      Interactive addition of profiles")
+	fmt.Println("\n  (empty)    Sync clusters defined in ~/.kboot.yaml and launch k9s")
+	fmt.Println("\nFlags:")
+	fmt.Println("  -h, --help Show this help message")
+}
+
+func handleAuthCommand(args []string) {
+	if len(args) == 0 {
+		printAuthHelp()
+		os.Exit(1)
+	}
+	switch args[0] {
+	case "new":
+		authNew()
+	case "add":
+		authAdd()
+	case "help", "--help", "-h":
+		printAuthHelp()
+	default:
+		fmt.Printf("Unknown auth command: %s\n", args[0])
+		printAuthHelp()
+		os.Exit(1)
+	}
+}
+
+func printAuthHelp() {
+	fmt.Println("Usage: kboot auth <command>")
+	fmt.Println("\nCommands:")
+	fmt.Println("  new   Interactive setup for AWS credentials/config (with backup)")
+	fmt.Println("  add   Interactive addition of AWS credentials/profiles")
+}
+
+// --- Auth Features ---
+
+func authNew() {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("Do you want to setup:")
+	fmt.Println(" [1] Static Credentials (~/.aws/credentials)")
+	fmt.Println(" [2] SSO Profiles (~/.aws/config)")
+	fmt.Print("Choice: ")
+	choice, _ := reader.ReadString('\n')
+	choice = strings.TrimSpace(choice)
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fatal("Could not find home directory: %v", err)
+	}
+	awsDir := filepath.Join(home, ".aws")
+	if err := os.MkdirAll(awsDir, 0700); err != nil {
+		fatal("Could not create .aws directory: %v", err)
+	}
+
+	var targetFile string
+	if choice == "1" {
+		targetFile = filepath.Join(awsDir, "credentials")
+	} else if choice == "2" {
+		targetFile = filepath.Join(awsDir, "config")
+	} else {
+		fatal("Invalid choice")
+	}
+
+	// Backup
+	if _, err := os.Stat(targetFile); err == nil {
+		backupFile := fmt.Sprintf("%s.bak.%d", targetFile, time.Now().Unix())
+		fmt.Printf("Backing up %s to %s...\n", targetFile, backupFile)
+		if err := copyFile(targetFile, backupFile); err != nil {
+			fatal("Backup failed: %v", err)
+		}
+	}
+
+	// Create new empty file
+	f, err := os.Create(targetFile)
+	if err != nil {
+		fatal("Failed to create new file: %v", err)
+	}
+	f.Close()
+	fmt.Printf("Created new empty %s\n", targetFile)
+}
+
+func authAdd() {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("Which type of credential to add?")
+	fmt.Println(" [1] Static Credentials (key/secret)")
+	fmt.Println(" [2] SSO Profile")
+	fmt.Print("Choice: ")
+	choice, _ := reader.ReadString('\n')
+	choice = strings.TrimSpace(choice)
+
+	if choice == "1" {
+		addStaticCredential(reader)
+	} else if choice == "2" {
+		addSSOProfile(reader)
+	} else {
+		fatal("Invalid choice")
+	}
+}
+
+func addStaticCredential(reader *bufio.Reader) {
+	fmt.Print("Profile Name: ")
+	profile, _ := reader.ReadString('\n')
+	profile = strings.TrimSpace(profile)
+
+	fmt.Print("AWS Access Key ID: ")
+	key, _ := reader.ReadString('\n')
+	key = strings.TrimSpace(key)
+
+	fmt.Print("AWS Secret Access Key: ")
+	secret, _ := reader.ReadString('\n')
+	secret = strings.TrimSpace(secret)
+
+	fmt.Print("AWS Session Token (optional, press enter to skip): ")
+	token, _ := reader.ReadString('\n')
+	token = strings.TrimSpace(token)
+
+	content := fmt.Sprintf("\n[%s]\naws_access_key_id = %s\naws_secret_access_key = %s\n", profile, key, secret)
+	if token != "" {
+		content += fmt.Sprintf("aws_session_token = %s\n", token)
+	}
+
+	home, _ := os.UserHomeDir()
+	path := filepath.Join(home, ".aws", "credentials")
+	appendToFile(path, content)
+	fmt.Printf("Added profile [%s] to %s\n", profile, path)
+}
+
+func addSSOProfile(reader *bufio.Reader) {
+	fmt.Print("Profile Name: ")
+	profile, _ := reader.ReadString('\n')
+	profile = strings.TrimSpace(profile)
+
+	fmt.Print("SSO Start URL: ")
+	url, _ := reader.ReadString('\n')
+	url = strings.TrimSpace(url)
+
+	fmt.Print("SSO Region: ")
+	region, _ := reader.ReadString('\n')
+	region = strings.TrimSpace(region)
+
+	fmt.Print("SSO Account ID: ")
+	accId, _ := reader.ReadString('\n')
+	accId = strings.TrimSpace(accId)
+
+	fmt.Print("SSO Role Name: ")
+	roleName, _ := reader.ReadString('\n')
+	roleName = strings.TrimSpace(roleName)
+
+	content := fmt.Sprintf("\n[profile %s]\nsso_start_url = %s\nsso_region = %s\nsso_account_id = %s\nsso_role_name = %s\n", profile, url, region, accId, roleName)
+
+	home, _ := os.UserHomeDir()
+	path := filepath.Join(home, ".aws", "config")
+	appendToFile(path, content)
+	fmt.Printf("Added profile [%s] to %s\n", profile, path)
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func appendToFile(path, content string) {
+	// Ensure dir exists
+	os.MkdirAll(filepath.Dir(path), 0700)
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		fatal("Failed to open %s: %v", path, err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(content); err != nil {
+		fatal("Failed to write to %s: %v", path, err)
+	}
+}
+
+// --- Main Kboot Logic ---
+
+func runKboot() {
 	// 1. configuration
 	configPath, err := getConfigPath()
 	if err != nil {
@@ -205,11 +413,6 @@ func ensureSSOLogin(sessionName string) error {
 				t, err := time.Parse(time.RFC3339, cache.ExpiresAt)
 				if err == nil {
 					if time.Now().Before(t) {
-						// Found a valid token?
-						// To be more precise we should check if it belongs to the session,
-						// but simpler logic: if ANY recent valid sso-token file exists, we assume logged in.
-						// Real verification might need to match the session specifically, but this is a heuristic.
-						// A stricter check would be to look for the specific session region/start URL match if known.
 						valid = true
 						return filepath.SkipAll // Stop searching
 					}
@@ -233,12 +436,6 @@ func ensureSSOLogin(sessionName string) error {
 }
 
 func generateKubeconfig(dir string, c Cluster) (string, error) {
-	// We rely on 'aws eks update-kubeconfig' logic but we want to build it manually to avoid calling the CLI 30 times.
-	// However, getting the CA data and Endpoint requires `aws eks describe-cluster`.
-	// To keep it strictly purely local without that call would require assuming we know the endpoint/CA.
-	// Since we don't have them in .kboot.yaml, we HAVE to query AWS.
-	// Optimally, we run `aws eks describe-cluster` for each.
-
 	// Command: aws eks describe-cluster --name <name> --region <region> --profile <profile>
 	type EKSDescribe struct {
 		Cluster struct {
