@@ -1,0 +1,17 @@
+# Binários e Artifacts
+dist/
+bin/
+kboot.exe
+kboot
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config Local (opcional, para não salvar segredos)
+.kboot.yaml.local
