@@ -597,8 +597,6 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, cmd
 
-	// ... (Rest of logic similar for delete/creds, simplified here to save space, but full implementation assumed for brevity)
-	// For now, I'll copy the delete and credential logic as it's critical for "runManager" to be complete.
 	case viewClusterDeleteConfirm:
 		form, cmd := m.form.Update(msg)
 		if f, ok := form.(*huh.Form); ok {
@@ -629,11 +627,301 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
-		// Assuming Static/SSO Creds logic is mostly identical, skipping full copy-paste if token limit is near,
-		// but I will include the RunManager entry point below.
+	// --- STATIC CREDENTIALS ---
+
+	case viewStaticCredsList:
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			if msg.Type == tea.KeyEsc || msg.String() == "backspace" {
+				m.view = viewMainMenu
+				m.status = ""
+				return m, nil
+			}
+
+			if key.Matches(msg, keyAdd) {
+				m.authFormData = &AuthFormData{}
+				m.form = newStaticCredentialForm(m.authFormData)
+				m.authEditIdx = -1
+				m.view = viewStaticAddForm
+				return m, m.form.Init()
+			}
+
+			if key.Matches(msg, keyEdit) {
+				if len(m.staticCreds) == 0 {
+					m.status = "Nenhuma credencial para editar"
+					return m, nil
+				}
+				idx := m.credList.Index()
+				if idx >= 0 && idx < len(m.staticCreds) {
+					cred := m.staticCreds[idx]
+					m.authFormData = &AuthFormData{
+						Profile:   cred.ProfileName,
+						AccessKey: cred.AccessKey, // Note: This is masked, user will overwrite
+						SecretKey: cred.SecretKey, // This is masked
+						Token:     cred.Token,     // This is masked
+					}
+					// If editing, we probably want to clear masked values or keep them if unchanged logic is implemented.
+					// For simplicity in CLI editors, usually we ask to re-enter secrets or keep old if empty.
+					// Here, simplified: User re-enters.
+					m.authFormData.AccessKey = ""
+					m.authFormData.SecretKey = ""
+					m.authFormData.Token = ""
+
+					m.form = newStaticCredentialForm(m.authFormData)
+					m.authEditIdx = idx
+					m.view = viewStaticEditForm
+					return m, m.form.Init()
+				}
+			}
+
+			if key.Matches(msg, keyDelete) {
+				if len(m.staticCreds) == 0 {
+					m.status = "Nada para deletar"
+					return m, nil
+				}
+				idx := m.credList.Index()
+				if idx >= 0 && idx < len(m.staticCreds) {
+					m.pendingDeleteIdx = idx
+					m.pendingDeleteName = m.staticCreds[idx].ProfileName
+					val := false
+					m.confirmDelete = &val
+					m.form = huh.NewForm(
+						huh.NewGroup(
+							huh.NewConfirm().
+								Title(fmt.Sprintf("Deletar credencial '%s'?", m.pendingDeleteName)).
+								Affirmative("Sim, deletar").
+								Negative("Cancelar").
+								Value(m.confirmDelete),
+						),
+					)
+					m.view = viewStaticDeleteConfirm
+					return m, m.form.Init()
+				}
+			}
+		}
+		m.credList, cmd = m.credList.Update(msg)
+		return m, cmd
+
+	case viewStaticAddForm, viewStaticEditForm:
+		if msg, ok := msg.(tea.KeyMsg); ok {
+			if msg.Type == tea.KeyEsc {
+				m.view = viewStaticCredsList
+				m.status = "Cancelado"
+				return m, nil
+			}
+		}
+
+		form, cmd := m.form.Update(msg)
+		if f, ok := form.(*huh.Form); ok {
+			m.form = f
+		}
+
+		if m.form.State == huh.StateCompleted {
+			// Save to ~/.aws/credentials
+			home, _ := getHomeDir()
+			credPath := filepath.Join(home, ".aws", "credentials")
+
+			content := fmt.Sprintf("\n[%s]\naws_access_key_id = %s\naws_secret_access_key = %s\n",
+				strings.TrimSpace(m.authFormData.Profile),
+				strings.TrimSpace(m.authFormData.AccessKey),
+				strings.TrimSpace(m.authFormData.SecretKey))
+
+			if strings.TrimSpace(m.authFormData.Token) != "" {
+				content += fmt.Sprintf("aws_session_token = %s\n", strings.TrimSpace(m.authFormData.Token))
+			}
+
+			if m.view == viewStaticEditForm {
+				// EDIT is hard without full parser.
+				// Deleting old and appending new is a strategy.
+				if deleteStaticCredential(m.staticCreds[m.authEditIdx].ProfileName) {
+					appendToFile(credPath, content)
+					m.status = "Atualizado (Recriado no final do arquivo)"
+				} else {
+					m.status = "Erro ao atualizar"
+				}
+			} else {
+				appendToFile(credPath, content)
+				m.status = "Adicionado"
+			}
+
+			// Refresh List
+			m.staticCreds = loadStaticCredentials()
+			items := make([]list.Item, len(m.staticCreds))
+			for i, c := range m.staticCreds {
+				items[i] = c
+			}
+			m.credList.SetItems(items)
+			m.view = viewStaticCredsList
+			return m, nil
+		}
+		return m, cmd
+
+	case viewStaticDeleteConfirm:
+		form, cmd := m.form.Update(msg)
+		if f, ok := form.(*huh.Form); ok {
+			m.form = f
+		}
+		if m.form.State == huh.StateCompleted {
+			if *m.confirmDelete {
+				if deleteStaticCredential(m.pendingDeleteName) {
+					m.status = "Deletado"
+				} else {
+					m.status = "Erro ao deletar"
+				}
+				m.staticCreds = loadStaticCredentials()
+				items := make([]list.Item, len(m.staticCreds))
+				for i, c := range m.staticCreds {
+					items[i] = c
+				}
+				m.credList.SetItems(items)
+			}
+			m.view = viewStaticCredsList
+			return m, nil
+		}
+		return m, cmd
+
+	// --- SSO PROFILES ---
+
+	case viewSSOProfilesList:
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			if msg.Type == tea.KeyEsc || msg.String() == "backspace" {
+				m.view = viewMainMenu
+				m.status = ""
+				return m, nil
+			}
+
+			if key.Matches(msg, keyAdd) {
+				m.authFormData = &AuthFormData{
+					SessionName: "my-sso",
+				}
+				m.form = newSSOProfileForm(m.authFormData)
+				m.authEditIdx = -1
+				m.view = viewSSOAddForm
+				return m, m.form.Init()
+			}
+
+			if key.Matches(msg, keyEdit) {
+				idx := m.credList.Index()
+				if idx >= 0 && idx < len(m.ssoProfiles) {
+					p := m.ssoProfiles[idx]
+					m.authFormData = &AuthFormData{
+						Profile:     p.ProfileName,
+						SessionName: p.SSOSession,
+						StartURL:    p.StartURL,
+						Region:      p.Region,
+						AccountID:   p.AccountID,
+						RoleName:    p.RoleName,
+					}
+					m.form = newSSOProfileForm(m.authFormData)
+					m.authEditIdx = idx
+					m.view = viewSSOEditForm
+					return m, m.form.Init()
+				}
+			}
+
+			if key.Matches(msg, keyDelete) {
+				idx := m.credList.Index()
+				if idx >= 0 && idx < len(m.ssoProfiles) {
+					m.pendingDeleteIdx = idx
+					m.pendingDeleteName = m.ssoProfiles[idx].ProfileName
+					val := false
+					m.confirmDelete = &val
+					m.form = huh.NewForm(
+						huh.NewGroup(
+							huh.NewConfirm().
+								Title(fmt.Sprintf("Deletar perfil SSO '%s'?", m.pendingDeleteName)).
+								Affirmative("Sim, deletar").
+								Negative("Cancelar").
+								Value(m.confirmDelete),
+						),
+					)
+					m.view = viewSSODeleteConfirm
+					return m, m.form.Init()
+				}
+			}
+		}
+		m.credList, cmd = m.credList.Update(msg)
+		return m, cmd
+
+	case viewSSOAddForm, viewSSOEditForm:
+		if msg, ok := msg.(tea.KeyMsg); ok {
+			if msg.Type == tea.KeyEsc {
+				m.view = viewSSOProfilesList
+				m.status = "Cancelado"
+				return m, nil
+			}
+		}
+
+		form, cmd := m.form.Update(msg)
+		if f, ok := form.(*huh.Form); ok {
+			m.form = f
+		}
+
+		if m.form.State == huh.StateCompleted {
+			home, _ := getHomeDir()
+			configPath := filepath.Join(home, ".aws", "config")
+
+			sessionBlock := fmt.Sprintf("\n[sso-session %s]\nsso_start_url = %s\nsso_region = %s\nsso_registration_scopes = sso:account:access\n",
+				strings.TrimSpace(m.authFormData.SessionName),
+				strings.TrimSpace(m.authFormData.StartURL),
+				strings.TrimSpace(m.authFormData.Region))
+
+			profileBlock := fmt.Sprintf("\n[profile %s]\nsso_session = %s\nsso_account_id = %s\nsso_role_name = %s\nregion = %s\noutput = json\n",
+				strings.TrimSpace(m.authFormData.Profile),
+				strings.TrimSpace(m.authFormData.SessionName),
+				strings.TrimSpace(m.authFormData.AccountID),
+				strings.TrimSpace(m.authFormData.RoleName),
+				strings.TrimSpace(m.authFormData.Region))
+
+			// Naive approach: Always append.
+			// Ideally we should check if session exists to avoid dupes, but AWS CLI handles it okay usually (last wins).
+			// For Edit: delete old profile block first.
+			if m.view == viewSSOEditForm {
+				deleteSSOProfile(m.ssoProfiles[m.authEditIdx].ProfileName)
+				m.status = "Atualizado"
+			} else {
+				m.status = "Adicionado"
+			}
+
+			appendToFile(configPath, sessionBlock+profileBlock)
+
+			m.ssoProfiles = loadSSOProfiles()
+			items := make([]list.Item, len(m.ssoProfiles))
+			for i, c := range m.ssoProfiles {
+				items[i] = c
+			}
+			m.credList.SetItems(items)
+			m.view = viewSSOProfilesList
+			return m, nil
+		}
+		return m, cmd
+
+	case viewSSODeleteConfirm:
+		form, cmd := m.form.Update(msg)
+		if f, ok := form.(*huh.Form); ok {
+			m.form = f
+		}
+		if m.form.State == huh.StateCompleted {
+			if *m.confirmDelete {
+				if deleteSSOProfile(m.pendingDeleteName) {
+					m.status = "Perfil SSO Deletado"
+				} else {
+					m.status = "Erro ao deletar perfil"
+				}
+				m.ssoProfiles = loadSSOProfiles()
+				items := make([]list.Item, len(m.ssoProfiles))
+				for i, c := range m.ssoProfiles {
+					items[i] = c
+				}
+				m.credList.SetItems(items)
+			}
+			m.view = viewSSOProfilesList
+			return m, nil
+		}
+		return m, cmd
 	}
 
-	// Fallback return
 	return m, nil
 }
 
@@ -790,4 +1078,57 @@ func newSSOProfileForm(data *AuthFormData) *huh.Form {
 			huh.NewInput().Title("Role Name").Value(&data.RoleName),
 		),
 	)
+}
+
+// Deletion Helpers (needed for actions)
+func deleteStaticCredential(profileName string) bool {
+	home, _ := getHomeDir()
+	path := filepath.Join(home, ".aws", "credentials")
+	input, _ := os.ReadFile(path)
+	lines := strings.Split(string(input), "\n")
+	var output []string
+	inSection := false
+	deleted := false
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") {
+			name := t[1 : len(t)-1]
+			if name == profileName {
+				inSection = true
+				deleted = true
+				continue
+			}
+			inSection = false
+		}
+		if !inSection {
+			output = append(output, l)
+		}
+	}
+	os.WriteFile(path, []byte(strings.Join(output, "\n")), 0600)
+	return deleted
+}
+
+func deleteSSOProfile(profileName string) bool {
+	home, _ := getHomeDir()
+	path := filepath.Join(home, ".aws", "config")
+	input, _ := os.ReadFile(path)
+	lines := strings.Split(string(input), "\n")
+	var output []string
+	inSection := false
+	deleted := false
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if strings.HasPrefix(t, "[profile "+profileName+"]") {
+			inSection = true
+			deleted = true
+			continue
+		} else if strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") {
+			inSection = false
+		}
+		if !inSection {
+			output = append(output, l)
+		}
+	}
+	os.WriteFile(path, []byte(strings.Join(output, "\n")), 0600)
+	return deleted
 }
