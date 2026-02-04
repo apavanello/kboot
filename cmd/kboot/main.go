@@ -41,6 +41,26 @@ func main() {
 		os.Exit(0)
 	}
 
+	// 1.5. Check for interactively enabled clusters (Optional flow)
+	// Only run interactive prompt if not headless (headless defaults to all? or none?
+	// Usually headless implies automation, so maybe we skip options or boot all.
+	// Let's assume headless boots ALL unless we add a flag. For now, prompt only in UI mode)
+	if !*headlessFunc {
+		finalClusters, err := ui.PromptOptionalClusters(cfg.Clusters)
+		if err != nil {
+			fmt.Println("Selection cancelled.")
+			os.Exit(0)
+		}
+		cfg.Clusters = finalClusters
+	}
+	// Note: In headless mode, we currently process ALL clusters (including optional ones) as "mandatory".
+	// Features like --include-optional could be added later.
+
+	if len(cfg.Clusters) == 0 {
+		fmt.Println("No clusters selected for boot.")
+		os.Exit(0)
+	}
+
 	// 2. Prepare Communication
 	// Channel for worker -> UI
 	eventChan := make(chan app.Event, len(cfg.Clusters)*2)

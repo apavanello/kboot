@@ -14,10 +14,11 @@ type Config struct {
 }
 
 type Cluster struct {
-	Alias   string `yaml:"alias"`
-	Profile string `yaml:"profile"`
-	Region  string `yaml:"region"`
-	Name    string `yaml:"name"`
+	Alias    string `yaml:"alias"`
+	Profile  string `yaml:"profile"`
+	Region   string `yaml:"region"`
+	Name     string `yaml:"name"`
+	Optional bool   `yaml:"optional"`
 }
 
 // Load reads the config from ~/.kboot.yaml

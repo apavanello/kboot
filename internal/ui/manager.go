@@ -61,8 +61,13 @@ type dashClusterItem struct {
 
 func (i dashClusterItem) Title() string { return i.Cluster.Alias }
 func (i dashClusterItem) Description() string {
-	return fmt.Sprintf("%s (%s @ %s)", i.Cluster.Name, i.Cluster.Profile, i.Cluster.Region)
+	info := fmt.Sprintf("%s (%s @ %s)", i.Cluster.Name, i.Cluster.Profile, i.Cluster.Region)
+	if i.Cluster.Optional {
+		info += " [Optional]"
+	}
+	return info
 }
+
 func (i dashClusterItem) FilterValue() string { return i.Cluster.Alias }
 
 // Credential item for display
@@ -95,6 +100,7 @@ type FormClusterConfig struct {
 	ClusterName string
 	Region      string
 	Profile     string
+	Optional    bool
 }
 
 // Auth form data
@@ -503,6 +509,7 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						ClusterName: cluster.Name,
 						Region:      cluster.Region,
 						Profile:     cluster.Profile,
+						Optional:    cluster.Optional,
 					}
 					m.form = newClusterForm(m.clusterFormData)
 					m.editIdx = idx
@@ -525,6 +532,7 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						ClusterName: cluster.Name,
 						Region:      cluster.Region,
 						Profile:     cluster.Profile,
+						Optional:    cluster.Optional,
 					}
 					m.form = newClusterForm(m.clusterFormData)
 					m.editIdx = -1 // It's a new item, not edit
@@ -553,10 +561,11 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.form.State == huh.StateCompleted {
 			newCluster := config.Cluster{
-				Alias:   strings.TrimSpace(m.clusterFormData.Alias),
-				Name:    strings.TrimSpace(m.clusterFormData.ClusterName),
-				Region:  strings.TrimSpace(m.clusterFormData.Region),
-				Profile: strings.TrimSpace(m.clusterFormData.Profile),
+				Alias:    strings.TrimSpace(m.clusterFormData.Alias),
+				Name:     strings.TrimSpace(m.clusterFormData.ClusterName),
+				Region:   strings.TrimSpace(m.clusterFormData.Region),
+				Profile:  strings.TrimSpace(m.clusterFormData.Profile),
+				Optional: m.clusterFormData.Optional,
 			}
 			if newCluster.Region == "" {
 				newCluster.Region = "us-east-1"
@@ -687,11 +696,15 @@ func newClusterForm(data *FormClusterConfig) *huh.Form {
 				Title("AWS Profile").
 				Options(profileOptions...).
 				Value(&data.Profile),
+			huh.NewConfirm().
+				Title("Opcional?").
+				Description("Se marcado, o login será perguntado ao iniciar.").
+				Value(&data.Optional),
 		),
 	)
 }
 
-// Stub view method for compilation (needs full implementation from legacy)
+// View method updated with correct switches
 func (m managerModel) View() string {
 	if m.quitting {
 		return ""
@@ -704,27 +717,77 @@ func (m managerModel) View() string {
 	case viewMainMenu:
 		title = "Kboot - Menu Principal"
 		content = docStyle.Render(m.mainMenu.View())
+	case viewClusterList:
+		title = "Clusters EKS"
+		content = docStyle.Render(m.list.View())
+	case viewClusterAddForm:
+		title = "Adicionar Cluster"
+		content = docStyle.Render(m.form.View())
+	case viewClusterEditForm:
+		title = "Editar Cluster"
+		content = docStyle.Render(m.form.View())
+	case viewStaticCredsList:
+		title = "Credenciais Estáticas (~/.aws/credentials)"
+		content = docStyle.Render(m.credList.View())
+	case viewStaticAddForm:
+		title = "Adicionar Credencial"
+		content = docStyle.Render(m.form.View())
+	case viewStaticEditForm:
+		title = "Editar Credencial"
+		content = docStyle.Render(m.form.View())
+	case viewSSOProfilesList:
+		title = "Perfis SSO (~/.aws/config)"
+		content = docStyle.Render(m.credList.View())
+	case viewSSOAddForm:
+		title = "Adicionar Perfil SSO"
+		content = docStyle.Render(m.form.View())
+	case viewSSOEditForm:
+		title = "Editar Perfil SSO"
+		content = docStyle.Render(m.form.View())
+	case viewClusterDeleteConfirm, viewStaticDeleteConfirm, viewSSODeleteConfirm:
+		title = "Confirmar Exclusão"
+		content = docStyle.Render(m.form.View())
 	default:
-		// Fallback for subviews that I am lazy to port all strings for in one shot
-		// In reality, this should switch case on m.view like Update
-		// But for compilation fix, let's just make it work
-		// If you want full view, I can restore it.
-		// Assuming minimal working fix:
-		if m.view == viewClusterList {
-			title = "Clusters EKS"
-			content = docStyle.Render(m.list.View())
-		} else if m.view == viewStaticCredsList {
-			title = "Static Creds"
-			content = docStyle.Render(m.credList.View())
-		} else if m.view == viewClusterAddForm {
-			title = "Add"
-			content = docStyle.Render(m.form.View())
-		} else {
-			content = "Not implemented fully in migration view"
-		}
+		title = "Kboot"
+		content = ""
 	}
 
 	header := managerTitleStyle.Render(title)
 	s := lipgloss.JoinVertical(lipgloss.Left, header, content)
-	return s
+
+	statusVal := m.status
+	if statusVal == "" {
+		statusVal = " "
+	}
+	status := statusStyle.Render(statusVal)
+	if m.err != nil {
+		status = errStyle.Render(fmt.Sprintf("Erro: %v", m.err))
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, s, status)
+}
+
+// Additional helpers (missing in previous chunks but needed for compilation if view switches hit them)
+func newStaticCredentialForm(data *AuthFormData) *huh.Form {
+	return huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().Title("Nome do Perfil").Value(&data.Profile),
+			huh.NewInput().Title("Access Key").Value(&data.AccessKey),
+			huh.NewInput().Title("Secret Key").Password(true).Value(&data.SecretKey),
+			huh.NewInput().Title("Token (Opional)").Value(&data.Token),
+		),
+	)
+}
+
+func newSSOProfileForm(data *AuthFormData) *huh.Form {
+	return huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().Title("Nome do Perfil").Value(&data.Profile),
+			huh.NewInput().Title("SSO Session").Value(&data.SessionName),
+			huh.NewInput().Title("Start URL").Value(&data.StartURL),
+			huh.NewInput().Title("Region").Value(&data.Region),
+			huh.NewInput().Title("Account ID").Value(&data.AccountID),
+			huh.NewInput().Title("Role Name").Value(&data.RoleName),
+		),
+	)
 }
