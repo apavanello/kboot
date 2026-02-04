@@ -10,16 +10,22 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
-	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"kboot/internal/app"
 	"kboot/internal/config"
 	"kboot/internal/kube"
-	// Temporarily importing UI logic only if needed,
-	// but strictly headless for now or based on flag.
+	"kboot/internal/ui"
 )
 
 func main() {
+	// 0. Check CLI commands (config)
+	if len(os.Args) > 1 && os.Args[1] == "config" {
+		ui.RunManager()
+		return
+	}
+
 	headlessFunc := flag.Bool("headless", false, "Generate kubeconfigs and exit without launching k9s")
 	flag.Parse()
 
@@ -31,50 +37,60 @@ func main() {
 	}
 
 	if len(cfg.Clusters) == 0 {
-		fmt.Println("No clusters configured. Please add clusters to ~/.kboot.yaml")
+		fmt.Println("No clusters configured. Please add clusters to ~/.kboot.yaml or run 'kboot config'")
 		os.Exit(0)
 	}
 
-	fmt.Printf("Booting %d clusters (Parallel Workers=5)...\n", len(cfg.Clusters))
+	// 2. Prepare Communication
+	// Channel for worker -> UI
+	eventChan := make(chan app.Event, len(cfg.Clusters)*2)
 
-	// 2. Run Orchestrator
+	// Orchestrator
 	orchestrator := app.NewOrchestrator(cfg)
 	ctx := context.Background()
-	results := orchestrator.Run(ctx)
 
-	// 3. Process Results
+	var results map[string]app.Result
+
+	// 3. UI or Headless?
+	if *headlessFunc {
+		// Headless: Just wait for results, no UI
+		close(eventChan)                     // Not using UI channel for processing
+		results = orchestrator.Run(ctx, nil) // Handle nil chan in orchestrator
+	} else {
+		// UI Mode
+		p := tea.NewProgram(ui.NewLoadingModel(cfg, eventChan))
+
+		// Run orchestrator in BG
+		go func() {
+			results = orchestrator.Run(ctx, eventChan)
+			p.Send(true) // Signal done to UI
+		}()
+
+		if _, err := p.Run(); err != nil {
+			fmt.Printf("UI Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// 4. Process Results (Same as before)
 	tempDir := filepath.Join(os.TempDir(), "kboot")
-	// Clean old files
 	os.RemoveAll(tempDir)
 
 	validPaths := []string{}
 	failedCount := 0
 
-	fmt.Println("\n--- Summary ---")
-	for alias, res := range results {
-		if res.Error != nil {
-			fmt.Printf("[x] %s: Failed (%v)\n", alias, res.Error)
+	for _, c := range cfg.Clusters {
+		res, ok := results[c.Alias]
+		if !ok || res.Error != nil {
 			failedCount++
 			continue
 		}
 
-		// Generate Kubeconfig for successful ones
-		// Find the cluster config to get profile/region (orchestrator result just has info)
-		// We could have passed config through result, but lookup is cheap enough for small N
-		var clusterConfig config.Cluster
-		for _, c := range cfg.Clusters {
-			if c.Alias == alias {
-				clusterConfig = c
-				break
-			}
-		}
-
-		path, err := kube.Generate(tempDir, alias, res.ClusterInfo, clusterConfig.Region, clusterConfig.Profile)
+		path, err := kube.Generate(tempDir, c.Alias, res.ClusterInfo, c.Region, c.Profile)
 		if err != nil {
-			fmt.Printf("[x] %s: Failed to write kubeconfig (%v)\n", alias, err)
+			fmt.Printf("Failed to write kubeconfig for %s: %v\n", c.Alias, err)
 			failedCount++
 		} else {
-			fmt.Printf("[v] %s: Ready\n", alias)
 			validPaths = append(validPaths, path)
 		}
 	}
@@ -84,34 +100,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	if failedCount > 0 {
-		fmt.Printf("\nWarning: %d clusters failed to load. Proceeding with %d available.\n", failedCount, len(validPaths))
-		// We pause briefly so user sees the error in headless/CLI mode
-		time.Sleep(2 * time.Second)
-	}
-
-	// 4. Handle Headless or Launch
+	// 5. Handle Headless or Launch
 	kubeconfigEnv := strings.Join(validPaths, string(filepath.ListSeparator))
 
 	if *headlessFunc {
-		fmt.Println("\nKUBECONFIG generated at:")
 		fmt.Println(kubeconfigEnv)
-		fmt.Println("\nYou can use it with:")
-		fmt.Printf("$env:KUBECONFIG=\"%s\"\n", kubeconfigEnv) // PowerShell syntax hint
 		os.Exit(0)
 	}
 
-	// 5. Launch K9s
+	// Launch K9s
 	runTool("k9s", kubeconfigEnv)
 }
 
 func runTool(toolName string, kubeconfigEnv string) {
-	// Simple run wrapper
 	toolPath, err := exec.LookPath(toolName)
 	if err != nil {
-		fmt.Printf("Tool '%s' not found. KUBECONFIG generated but cannot launch app.\n", toolName)
-		fmt.Println(kubeconfigEnv)
-		os.Exit(0)
+		fmt.Printf("Tool '%s' not found.\n", toolName)
+		return
 	}
 
 	env := os.Environ()
@@ -125,6 +130,7 @@ func runTool(toolName string, kubeconfigEnv string) {
 		cmd.Stderr = os.Stderr
 		cmd.Run()
 	} else {
+		// Replace process
 		syscall.Exec(toolPath, []string{toolName}, env)
 	}
 }
