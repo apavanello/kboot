@@ -71,27 +71,44 @@
 
 ## Instalação
 
-### Instalador YOLO (Recomendado)
+### Instalação Rápida (Recomendado)
 
-Instala todas as dependências (Go, Docker, kubectl, kind, Terraform, k9s), compila o kboot, configura LocalStack + clusters kind, e prepara tudo automaticamente:
+Um comando — baixa o binário da última release e instala em `~/.local/bin`:
 
 ```bash
-make install-yolo
+curl -fsSL https://raw.githubusercontent.com/apavanello/kboot/main/scripts/install.sh | bash
 ```
+
+### Setup Completo (YOLO)
+
+Instala todas as dependências (Go, Docker, kubectl, kind, Terraform, k9s), compila o kboot, configura LocalStack + clusters kind, e prepara tudo:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/apavanello/kboot/main/scripts/install.sh | bash -s full
+```
+
+### Comandos do Instalador YOLO
+
+| Comando | O que faz |
+|---|---|
+| `curl ... \| bash` | Baixa o binário da última release (ou builda do source se não houver release) |
+| `curl ... \| bash -s update` | Atualiza para a última release se houver versão mais nova |
+| `curl ... \| bash -s full` | Instala todas as dependências + kboot + configura infra de teste |
+| `curl ... \| bash -s help` | Mostra todas as opções disponíveis |
 
 ### Compilar a partir do Código Fonte
 
 ```bash
 git clone https://github.com/apavanello/kboot
 cd kboot
-go build -o kboot ./cmd/kboot/
+make install      # Build + instala em ~/.local/bin
 ```
 
 ### Usando Make
 
 ```bash
 make build        # Compila para ./bin/kboot
-make install      # Instala em $GOPATH/bin
+make install      # Instala em ~/.local/bin
 make run          # Compila e lança imediatamente
 ```
 
