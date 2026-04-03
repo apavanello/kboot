@@ -5,7 +5,6 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-CYAN='\033[0;36m'
 NC='\033[0m'
 
 pass()  { echo -e "${GREEN}✓${NC} $*"; }
@@ -18,6 +17,10 @@ BIN_DIR="$HOME/.local/bin"
 KBOOT_BIN="$BIN_DIR/kboot"
 GITHUB_REPO="apavanello/kboot"
 GITHUB_API="https://api.github.com/repos/$GITHUB_REPO"
+
+is_local_repo() {
+    [ -f "$PROJECT_DIR/Makefile" ] && [ -d "$PROJECT_DIR/.git" ]
+}
 
 ensure_bin_dir() {
     mkdir -p "$BIN_DIR"
@@ -50,12 +53,6 @@ download_release() {
     arch="$(uname -m)"
     [ "$arch" = "x86_64" ] && arch="amd64"
     [ "$arch" = "aarch64" ] && arch="arm64"
-    [ "$os" = "darwin" ] && os="darwin"
-    [ "$os" = "linux" ] && os="linux"
-    
-    if [ "$os" = "windows" ]; then
-        ext="zip"
-    fi
     
     local filename="kboot_${tag#v}_${os}_${arch}.${ext}"
     local download_url="$GITHUB_API/releases/download/$tag/$filename"
@@ -64,10 +61,11 @@ download_release() {
     local tmpfile="/tmp/$filename"
     
     if ! curl -fSL "$download_url" -o "$tmpfile" 2>/dev/null; then
-        warn "Release binary not found, falling back to source build..."
+        warn "Release binary not found"
         return 1
     fi
     
+    mkdir -p /tmp/kboot_extract
     if [ "$ext" = "zip" ]; then
         unzip -o "$tmpfile" -d /tmp/kboot_extract/
     else
@@ -79,7 +77,21 @@ download_release() {
     rm -rf /tmp/kboot_extract "$tmpfile"
     
     pass "kboot $tag installed from release"
-    return 0
+}
+
+build_from_source() {
+    info "Building kboot from source..."
+    make -C "$PROJECT_DIR" build >/dev/null 2>&1
+    if [ -f "$PROJECT_DIR/bin/kboot" ]; then
+        cp "$PROJECT_DIR/bin/kboot" "$KBOOT_BIN"
+        chmod +x "$KBOOT_BIN"
+        local ver
+        ver="$("$KBOOT_BIN" version 2>&1 || echo "unknown")"
+        pass "kboot built and installed: $ver"
+    else
+        fail "Build failed — binary not found"
+        exit 1
+    fi
 }
 
 install_kboot() {
@@ -87,16 +99,17 @@ install_kboot() {
     
     local installed_ver
     installed_ver="$(get_installed_version)"
+    
+    if is_local_repo; then
+        info "Local repository detected — building from source..."
+        build_from_source
+        return
+    fi
+    
     local latest_tag
     latest_tag="$(get_latest_release)"
     
-    if [ "$installed_ver" != "not-installed" ] && [ "$installed_ver" != "unknown" ]; then
-        info "Installed version: $installed_ver"
-    fi
-    
     if [ -n "$latest_tag" ]; then
-        info "Latest release: $latest_tag"
-        
         if [ "$installed_ver" != "not-installed" ] && [ "$installed_ver" != "unknown" ]; then
             local installed_clean="${installed_ver#v}"
             local latest_clean="${latest_tag#v}"
@@ -106,7 +119,6 @@ install_kboot() {
                 return 0
             elif version_gt "$installed_clean" "$latest_clean"; then
                 warn "Installed version ($installed_ver) is newer than release ($latest_tag)"
-                warn "You may be running a development build"
                 return 0
             else
                 info "Updating kboot from $installed_ver to $latest_tag..."
@@ -119,21 +131,8 @@ install_kboot() {
         fi
     fi
     
-    info "Building kboot from source..."
-    if [ -f "$PROJECT_DIR/Makefile" ]; then
-        make -C "$PROJECT_DIR" build
-        if [ -f "$PROJECT_DIR/bin/kboot" ]; then
-            cp "$PROJECT_DIR/bin/kboot" "$KBOOT_BIN"
-            chmod +x "$KBOOT_BIN"
-            pass "kboot built and installed to $KBOOT_BIN"
-        else
-            fail "Build failed — binary not found"
-            exit 1
-        fi
-    else
-        fail "No Makefile found and no release available"
-        exit 1
-    fi
+    warn "No release available — please clone the repo and run: bash scripts/install.sh"
+    exit 1
 }
 
 install_go() {
@@ -142,16 +141,15 @@ install_go() {
         return
     fi
     info "Installing Go..."
-    local go_version="1.22.5"
-    curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" | tar -C /usr/local -xzf -
+    curl -fsSL "https://go.dev/dl/go1.22.5.linux-amd64.tar.gz" | tar -C /usr/local -xzf -
     echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
     export PATH=$PATH:/usr/local/go/bin
-    pass "Go installed: $(go version)"
+    pass "Go installed"
 }
 
 install_kubectl() {
     if command -v kubectl &>/dev/null; then
-        pass "kubectl already installed: $(kubectl version --client 2>&1 | head -1)"
+        pass "kubectl already installed"
         return
     fi
     info "Installing kubectl..."
@@ -163,7 +161,7 @@ install_kubectl() {
 
 install_kind() {
     if command -v kind &>/dev/null; then
-        pass "kind already installed: $(kind version 2>&1)"
+        pass "kind already installed"
         return
     fi
     info "Installing kind..."
@@ -175,7 +173,7 @@ install_kind() {
 
 install_terraform() {
     if command -v terraform &>/dev/null; then
-        pass "Terraform already installed: $(terraform version -json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['terraform_version'])" 2>/dev/null || terraform version | head -1)"
+        pass "Terraform already installed"
         return
     fi
     info "Installing Terraform..."
@@ -189,7 +187,7 @@ install_terraform() {
 
 install_k9s() {
     if command -v k9s &>/dev/null; then
-        pass "k9s already installed: $(k9s version 2>&1)"
+        pass "k9s already installed"
         return
     fi
     info "Installing k9s..."
@@ -337,21 +335,25 @@ show_usage() {
     echo "Usage: $0 [command]"
     echo ""
     echo "Commands:"
-    echo "  install (default)  Install or update kboot + dependencies"
-    echo "  update             Update kboot to latest release only"
-    echo "  full               Install everything + setup test infra"
+    echo "  (none)             Build/install kboot from source (default)"
+    echo "  update             Check for new release and update"
+    echo "  full               Install deps + kboot + setup test infra"
     echo "  help               Show this help"
     echo ""
-    echo "Examples:"
-    echo "  curl -fsSL .../install.sh | bash        # Install/update kboot"
-    echo "  curl -fsSL .../install.sh | bash -s full # Full setup with infra"
+    echo "From repo:"
+    echo "  bash scripts/install.sh           # Build from source"
+    echo "  make install-yolo                 # Same as above"
+    echo ""
+    echo "From web (no repo):"
+    echo "  curl -fsSL .../install.sh | bash  # Download latest release"
+    echo "  curl -fsSL .../install.sh | bash -s update  # Update to latest"
 }
 
 main() {
-    local command="${1:-install}"
+    local command="${1:-}"
     
     case "$command" in
-        install|update)
+        update)
             ensure_bin_dir
             install_kboot
             verify
@@ -371,6 +373,11 @@ main() {
             ;;
         help|--help|-h)
             show_usage
+            ;;
+        "")
+            ensure_bin_dir
+            install_kboot
+            verify
             ;;
         *)
             echo "Unknown command: $command"
