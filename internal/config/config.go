@@ -10,11 +10,11 @@ import (
 
 // Config represents the ~/.kboot.yaml structure
 type Config struct {
-	Clusters            []Cluster `yaml:"clusters"`
-	AWSCredentialsFile  string    `yaml:"aws_credentials_file,omitempty"`
-	AWSConfigFile       string    `yaml:"aws_config_file,omitempty"`
-	AWSSSOCacheDir      string    `yaml:"aws_sso_cache_dir,omitempty"`
-	UseSystemAWS        bool      `yaml:"use_system_aws,omitempty"`
+	Clusters           []Cluster `yaml:"clusters"`
+	AWSCredentialsFile string    `yaml:"aws_credentials_file,omitempty"`
+	AWSConfigFile      string    `yaml:"aws_config_file,omitempty"`
+	AWSSSOCacheDir     string    `yaml:"aws_sso_cache_dir,omitempty"`
+	UseSystemAWS       bool      `yaml:"use_system_aws,omitempty"`
 }
 
 type Cluster struct {
@@ -70,6 +70,9 @@ func Save(cfg *Config) error {
 
 // GetPath returns the secure location of the config file
 func GetPath() (string, error) {
+	if dir := os.Getenv("KB_CONFIG_DIR"); dir != "" {
+		return filepath.Join(dir, ".kboot.yaml"), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -79,6 +82,9 @@ func GetPath() (string, error) {
 
 // KbootDir returns the path to ~/.kboot/
 func KbootDir() (string, error) {
+	if dir := os.Getenv("KB_CONFIG_DIR"); dir != "" {
+		return dir, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

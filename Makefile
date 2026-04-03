@@ -75,37 +75,33 @@ tidy:
 
 # ─── Test ──────────────────────────────────────────────────────────
 
-.PHONY: test test-verbose test-coverage test-e2e
+.PHONY: test test-verbose test-coverage test-e2e test-integration
 
 test:
-	@echo "$(BLUE)[test]$(NC) Running tests..."
+	@echo "$(BLUE)[test]$(NC) Running unit tests..."
 	$(GO) test -race -count=1 ./...
 
 test-verbose:
-	@echo "$(BLUE)[test]$(NC) Running tests (verbose)..."
+	@echo "$(BLUE)[test]$(NC) Running unit tests (verbose)..."
 	$(GO) test -race -v -count=1 ./...
 
 test-coverage:
-	@echo "$(BLUE)[test]$(NC) Running tests with coverage..."
+	@echo "$(BLUE)[test]$(NC) Running unit tests with coverage..."
 	$(GO) test -race -coverprofile=coverage.out -covermode=atomic ./...
 	$(GO) tool cover -func=coverage.out
 	@rm -f coverage.out
 
 test-e2e: build
-	@echo "$(BLUE)[e2e]$(NC) Running end-to-end tests..."
+	@echo "$(BLUE)[e2e]$(NC) Running CLI unit tests..."
 	@bash ./scripts/test-e2e.sh
 
-# ─── Infrastructure (LocalStack + kind) ────────────────────────────
+test-integration: build
+	@echo "$(BLUE)[integration]$(NC) Running full integration test suite..."
+	@bash ./scripts/test-integration.sh
 
-.PHONY: infra infra-setup infra-cleanup infra-status infra-destroy
+# ─── YOLO Install ──────────────────────────────────────────────────
 
-infra: infra-setup
-
-infra-setup:
-	@echo "$(BLUE)[infra]$(NC) Setting up LocalStack + kind test environment..."
-	@bash $(INFRA_DIR)/bootstrap.sh setup
-
-infra-cleanup:
+.PHONY: install-yolo
 	@echo "$(YELLOW)[infra]$(NC) Tearing down test environment..."
 	@bash $(INFRA_DIR)/bootstrap.sh cleanup
 
@@ -153,9 +149,12 @@ help:
 	@echo "$(GREEN)Test:$(NC)"
 	@echo "  make test         — Run tests with race detection"
 	@echo "  make test-verbose — Run tests (verbose output)"
-	@echo "  make test-coverage— Run tests with coverage report
-  make test-e2e     — Run end-to-end tests (build + config + CLI)
-  make test-e2e     — Run end-to-end tests (build + config + CLI)"
+	@echo "  make test-coverage— Run tests with coverage report"
+	@echo "  make test-e2e        — Run end-to-end tests (build + config + CLI)"
+	@echo "  make test-integration — Run full integration suite (infra + kubectl)"
+	@echo ""
+	@echo "$(GREEN)Install:$(NC)"
+	@echo "  make install-yolo    — Automated install (Go, Docker, kubectl, kind, TF, k9s + infra)"
 	@echo ""
 	@echo "$(GREEN)Infrastructure:$(NC)"
 	@echo "  make infra        — Setup LocalStack + kind test env"
