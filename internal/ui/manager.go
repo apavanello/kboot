@@ -735,30 +735,20 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "Adicionado"
 			}
 
-			if ep := strings.TrimSpace(m.authFormData.Endpoint); ep != "" {
+			profile := strings.TrimSpace(m.authFormData.Profile)
+			ep := strings.TrimSpace(m.authFormData.Endpoint)
+			oldEp := loadEndpointForProfile(profile)
+
+			if oldEp != "" {
+				deleteEndpointForProfile(profile)
+			}
+			if ep != "" {
 				profileBlock := fmt.Sprintf("\n[profile %s]\nendpoint_url = %s\n",
-					strings.TrimSpace(m.authFormData.Profile), ep)
+					profile, ep)
 				appendToFile(configPath, profileBlock)
 				m.status += " + endpoint configurado"
-			}
-
-			if m.view == viewStaticEditForm {
-				if deleteStaticCredential(m.staticCreds[m.authEditIdx].ProfileName) {
-					appendToFile(credPath, content)
-					m.status = "Atualizado (Recriado no final do arquivo)"
-				} else {
-					m.status = "Erro ao atualizar"
-				}
-			} else {
-				appendToFile(credPath, content)
-				m.status = "Adicionado"
-			}
-
-			if ep := strings.TrimSpace(m.authFormData.Endpoint); ep != "" {
-				profileBlock := fmt.Sprintf("\n[profile %s]\nendpoint_url = %s\n",
-					strings.TrimSpace(m.authFormData.Profile), ep)
-				appendToFile(configPath, profileBlock)
-				m.status += " + endpoint configurado"
+			} else if oldEp != "" {
+				m.status += " + endpoint removido"
 			}
 
 			// Refresh List
@@ -1183,3 +1173,38 @@ func loadEndpointForProfile(profileName string) string {
 	}
 	return ""
 }
+
+func deleteEndpointForProfile(profileName string) bool {
+	home, _ := getHomeDir()
+	path := filepath.Join(home, ".aws", "config")
+	input, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	lines := strings.Split(string(input), "\n")
+	var output []string
+	inSection := false
+	profileSection := fmt.Sprintf("[profile %s]", profileName)
+	deleted := false
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if t == profileSection {
+			inSection = true
+			continue
+		}
+		if strings.HasPrefix(t, "[") {
+			if inSection {
+				inSection = false
+				deleted = true
+			}
+		}
+		if !inSection {
+			output = append(output, l)
+		}
+	}
+	if deleted {
+		os.WriteFile(path, []byte(strings.Join(output, "\n")), 0600)
+	}
+	return deleted
+}
+
