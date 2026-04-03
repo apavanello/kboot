@@ -5,7 +5,7 @@
 ## Funcionalidades
 
 - **Dashboard TUI Unificado** (v2.3): Gerencie clusters e credenciais AWS de uma única interface
-- **Autenticação Inteligente**: Valida sessões SSO automaticamente e executa `aws sso login` quando necessário
+- **Autenticação Inteligente**: Valida sessões SSO automaticamente usando AWS SDK Go v2 (sem necessidade de AWS CLI)
 - **Sincronização Paralela**: Gera kubeconfigs para múltiplos clusters simultaneamente
 - **Aliasing de Contexto**: Mapeia ARNs complexos para apelidos curtos (ex: `prod`, `staging`)
 - **Zero Poluição**: **Não** modifica seu `~/.kube/config`. Usa configs temporários
@@ -15,7 +15,6 @@
 
 ### Pré-requisitos
 - Go 1.21+
-- AWS CLI v2
 - `k9s` (recomendado)
 
 ### Compilar
