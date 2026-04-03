@@ -31,26 +31,52 @@ func userHomeDir() string {
 
 // SSOLogin performs SSO login using the AWS SDK device authorization flow.
 func SSOLogin(ctx context.Context, ssoSession string) error {
-	cfg, err := config.LoadDefaultConfig(ctx)
+	return SSOLoginWithOptions(ctx, ssoSession, ClientOptions{})
+}
+
+// SSOLoginWithOptions performs SSO login with custom AWS file paths.
+func SSOLoginWithOptions(ctx context.Context, ssoSession string, opts ClientOptions) error {
+	loadOpts := []func(*config.LoadOptions) error{}
+
+	if opts.ConfigFile != "" {
+		if _, err := os.Stat(opts.ConfigFile); err == nil {
+			loadOpts = append(loadOpts, config.WithSharedConfigFiles([]string{opts.ConfigFile}))
+		}
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to load default config: %w", err)
 	}
-	return doSSOLogin(ctx, cfg, ssoSession)
+	return doSSOLogin(ctx, cfg, ssoSession, opts)
 }
 
 // SSOLoginProfile performs SSO login using the profile name.
 func SSOLoginProfile(ctx context.Context, profile string) error {
-	cfg, err := config.LoadDefaultConfig(ctx,
+	return SSOLoginProfileWithOptions(ctx, profile, ClientOptions{})
+}
+
+// SSOLoginProfileWithOptions performs SSO login using the profile name with custom paths.
+func SSOLoginProfileWithOptions(ctx context.Context, profile string, opts ClientOptions) error {
+	loadOpts := []func(*config.LoadOptions) error{
 		config.WithSharedConfigProfile(profile),
-	)
+	}
+
+	if opts.ConfigFile != "" {
+		if _, err := os.Stat(opts.ConfigFile); err == nil {
+			loadOpts = append(loadOpts, config.WithSharedConfigFiles([]string{opts.ConfigFile}))
+		}
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to load config for profile %s: %w", profile, err)
 	}
-	return doSSOLogin(ctx, cfg, profile)
+	return doSSOLogin(ctx, cfg, profile, opts)
 }
 
-func doSSOLogin(ctx context.Context, cfg aws.Config, identifier string) error {
-	ssoSession, ssoStartURL, ssoRegion, err := resolveSSOConfig(identifier)
+func doSSOLogin(ctx context.Context, cfg aws.Config, identifier string, opts ClientOptions) error {
+	ssoSession, ssoStartURL, ssoRegion, err := resolveSSOConfig(identifier, opts.ConfigFile)
 	if err != nil {
 		return fmt.Errorf("SSO config resolution: %w", err)
 	}
@@ -59,7 +85,7 @@ func doSSOLogin(ctx context.Context, cfg aws.Config, identifier string) error {
 		o.Region = ssoRegion
 	})
 
-	clientID, clientSecret, err := getOrCreateSSOClient(ctx, oidcClient, ssoSession)
+	clientID, clientSecret, err := getOrCreateSSOClient(ctx, oidcClient, ssoSession, opts)
 	if err != nil {
 		return fmt.Errorf("SSO client registration: %w", err)
 	}
@@ -87,7 +113,7 @@ func doSSOLogin(ctx context.Context, cfg aws.Config, identifier string) error {
 		return fmt.Errorf("SSO login failed: %w", err)
 	}
 
-	if err := writeSSOTokenCache(ssoSession, ssoStartURL, ssoRegion, aws.ToString(token.AccessToken), clientID, clientSecret, token.ExpiresIn); err != nil {
+	if err := writeSSOTokenCache(ssoSession, ssoStartURL, ssoRegion, aws.ToString(token.AccessToken), clientID, clientSecret, token.ExpiresIn, opts); err != nil {
 		fmt.Printf("Warning: could not cache SSO token: %v\n", err)
 	}
 
@@ -95,9 +121,14 @@ func doSSOLogin(ctx context.Context, cfg aws.Config, identifier string) error {
 	return nil
 }
 
-func resolveSSOConfig(identifier string) (session, startURL, region string, err error) {
-	home := userHomeDir()
-	configPath := filepath.Join(home, ".aws", "config")
+func resolveSSOConfig(identifier, configFileOverride string) (session, startURL, region string, err error) {
+	var configPath string
+	if configFileOverride != "" {
+		configPath = configFileOverride
+	} else {
+		configPath = filepath.Join(userHomeDir(), ".aws", "config")
+	}
+
 	data, readErr := os.ReadFile(configPath)
 	if readErr != nil {
 		return "", "", "", fmt.Errorf("cannot read %s: %w", configPath, readErr)
@@ -217,8 +248,12 @@ func parseProfileSection(content, sectionName string) (ssoSession, startURL, reg
 	return
 }
 
-func getOrCreateSSOClient(ctx context.Context, client *ssooidc.Client, ssoSession string) (clientID, clientSecret string, err error) {
-	cachePath := filepath.Join(userHomeDir(), ".aws", "sso", "cache", ssoSession+"-client.json")
+func getOrCreateSSOClient(ctx context.Context, client *ssooidc.Client, ssoSession string, opts ClientOptions) (clientID, clientSecret string, err error) {
+	cacheDir := opts.SSOCacheDir
+	if cacheDir == "" {
+		cacheDir = filepath.Join(userHomeDir(), ".aws", "sso", "cache")
+	}
+	cachePath := filepath.Join(cacheDir, ssoSession+"-client.json")
 
 	if data, err := os.ReadFile(cachePath); err == nil {
 		var cached struct {
@@ -309,8 +344,12 @@ func pollForToken(ctx context.Context, client *ssooidc.Client, clientID, clientS
 	return nil, fmt.Errorf("SSO login timed out after %d seconds", expiresInSeconds)
 }
 
-func writeSSOTokenCache(ssoSession, startURL, region, accessToken, clientID, clientSecret string, expiresIn int32) error {
-	cacheDir := filepath.Join(userHomeDir(), ".aws", "sso", "cache")
+func writeSSOTokenCache(ssoSession, startURL, region, accessToken, clientID, clientSecret string, expiresIn int32, opts ClientOptions) error {
+	cacheDir := opts.SSOCacheDir
+	if cacheDir == "" {
+		cacheDir = filepath.Join(userHomeDir(), ".aws", "sso", "cache")
+	}
+
 	if err := os.MkdirAll(cacheDir, 0700); err != nil {
 		return fmt.Errorf("create cache dir: %w", err)
 	}

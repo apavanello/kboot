@@ -75,7 +75,7 @@ tidy:
 
 # ─── Test ──────────────────────────────────────────────────────────
 
-.PHONY: test test-verbose test-coverage
+.PHONY: test test-verbose test-coverage test-e2e
 
 test:
 	@echo "$(BLUE)[test]$(NC) Running tests..."
@@ -90,6 +90,10 @@ test-coverage:
 	$(GO) test -race -coverprofile=coverage.out -covermode=atomic ./...
 	$(GO) tool cover -func=coverage.out
 	@rm -f coverage.out
+
+test-e2e: build
+	@echo "$(BLUE)[e2e]$(NC) Running end-to-end tests..."
+	@bash ./scripts/test-e2e.sh
 
 # ─── Infrastructure (LocalStack + kind) ────────────────────────────
 
@@ -149,7 +153,9 @@ help:
 	@echo "$(GREEN)Test:$(NC)"
 	@echo "  make test         — Run tests with race detection"
 	@echo "  make test-verbose — Run tests (verbose output)"
-	@echo "  make test-coverage— Run tests with coverage report"
+	@echo "  make test-coverage— Run tests with coverage report
+  make test-e2e     — Run end-to-end tests (build + config + CLI)
+  make test-e2e     — Run end-to-end tests (build + config + CLI)"
 	@echo ""
 	@echo "$(GREEN)Infrastructure:$(NC)"
 	@echo "  make infra        — Setup LocalStack + kind test env"

@@ -57,6 +57,12 @@ func (o *Orchestrator) Run(ctx context.Context, eventChan chan<- Event) map[stri
 	sem := make(chan struct{}, o.MaxWorkers)
 	var wg sync.WaitGroup
 
+	clientOpts := aws.ClientOptions{
+		CredentialsFile: o.Config.AWSCredentialsPath(),
+		ConfigFile:      o.Config.AWSConfigPath(),
+		SSOCacheDir:     o.Config.AWSSSOCachePath(),
+	}
+
 	for _, cluster := range o.Config.Clusters {
 		wg.Add(1)
 
@@ -73,7 +79,7 @@ func (o *Orchestrator) Run(ctx context.Context, eventChan chan<- Event) map[stri
 			workerCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 			defer cancel()
 
-			res := o.processCluster(workerCtx, c)
+			res := o.processCluster(workerCtx, c, clientOpts)
 
 			if eventChan != nil {
 				if res.Error != nil {
@@ -93,10 +99,10 @@ func (o *Orchestrator) Run(ctx context.Context, eventChan chan<- Event) map[stri
 	return results
 }
 
-func (o *Orchestrator) processCluster(ctx context.Context, c config.Cluster) Result {
+func (o *Orchestrator) processCluster(ctx context.Context, c config.Cluster, opts aws.ClientOptions) Result {
 	res := Result{ClusterAlias: c.Alias}
 
-	client, err := aws.NewClient(ctx, c.Profile, c.Region)
+	client, err := aws.NewClientWithOptions(ctx, c.Profile, c.Region, opts)
 	if err != nil {
 		res.Error = fmt.Errorf("client init: %w", err)
 		return res
@@ -106,13 +112,13 @@ func (o *Orchestrator) processCluster(ctx context.Context, c config.Cluster) Res
 	_, err = client.CheckIdentity(ctx)
 	if err != nil {
 		// 2. SSO Login
-		if loginErr := aws.SSOLoginProfile(ctx, c.Profile); loginErr != nil {
+		if loginErr := aws.SSOLoginProfileWithOptions(ctx, c.Profile, opts); loginErr != nil {
 			res.Error = fmt.Errorf("login failed: %w", loginErr)
 			return res
 		}
 
 		// 3. Recreate client to pick up fresh credentials
-		client, err = aws.NewClient(ctx, c.Profile, c.Region)
+		client, err = aws.NewClientWithOptions(ctx, c.Profile, c.Region, opts)
 		if err != nil {
 			res.Error = fmt.Errorf("client reinit after login: %w", err)
 			return res

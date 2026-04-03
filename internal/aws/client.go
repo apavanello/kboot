@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -28,12 +29,37 @@ type Client struct {
 	STSClient *sts.Client
 }
 
+// ClientOptions holds custom AWS file paths for isolated mode
+type ClientOptions struct {
+	CredentialsFile string
+	ConfigFile      string
+	SSOCacheDir     string
+}
+
 // NewClient initializes AWS clients for a specific profile and region
 func NewClient(ctx context.Context, profile, region string) (*Client, error) {
-	cfg, err := config.LoadDefaultConfig(ctx,
+	return NewClientWithOptions(ctx, profile, region, ClientOptions{})
+}
+
+// NewClientWithOptions initializes AWS clients with custom file paths
+func NewClientWithOptions(ctx context.Context, profile, region string, opts ClientOptions) (*Client, error) {
+	loadOpts := []func(*config.LoadOptions) error{
 		config.WithSharedConfigProfile(profile),
 		config.WithRegion(region),
-	)
+	}
+
+	if opts.CredentialsFile != "" {
+		if _, err := os.Stat(opts.CredentialsFile); err == nil {
+			loadOpts = append(loadOpts, config.WithSharedCredentialsFiles([]string{opts.CredentialsFile}))
+		}
+	}
+	if opts.ConfigFile != "" {
+		if _, err := os.Stat(opts.ConfigFile); err == nil {
+			loadOpts = append(loadOpts, config.WithSharedConfigFiles([]string{opts.ConfigFile}))
+		}
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load aws config for profile %s: %w", profile, err)
 	}
@@ -127,10 +153,28 @@ type Credentials struct {
 // GenerateEKSToken is a standalone function that creates an EKS auth token
 // without requiring a full Client instance. Used by kubeconfig generator.
 func GenerateEKSToken(ctx context.Context, profile, region, clusterName string) (string, error) {
-	cfg, err := config.LoadDefaultConfig(ctx,
+	return GenerateEKSTokenWithOptions(ctx, profile, region, clusterName, ClientOptions{})
+}
+
+// GenerateEKSTokenWithOptions creates an EKS auth token with custom AWS file paths.
+func GenerateEKSTokenWithOptions(ctx context.Context, profile, region, clusterName string, opts ClientOptions) (string, error) {
+	loadOpts := []func(*config.LoadOptions) error{
 		config.WithSharedConfigProfile(profile),
 		config.WithRegion(region),
-	)
+	}
+
+	if opts.CredentialsFile != "" {
+		if _, err := os.Stat(opts.CredentialsFile); err == nil {
+			loadOpts = append(loadOpts, config.WithSharedCredentialsFiles([]string{opts.CredentialsFile}))
+		}
+	}
+	if opts.ConfigFile != "" {
+		if _, err := os.Stat(opts.ConfigFile); err == nil {
+			loadOpts = append(loadOpts, config.WithSharedConfigFiles([]string{opts.ConfigFile}))
+		}
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
 		return "", fmt.Errorf("failed to load config: %w", err)
 	}
