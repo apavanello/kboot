@@ -99,9 +99,17 @@ test-integration: build
 	@echo "$(BLUE)[integration]$(NC) Running full integration test suite..."
 	@bash ./scripts/test-integration.sh
 
-# ─── YOLO Install ──────────────────────────────────────────────────
+# ─── Infrastructure (LocalStack + kind) ────────────────────────────
 
-.PHONY: install-yolo
+.PHONY: infra infra-setup infra-cleanup infra-status infra-destroy
+
+infra: infra-setup
+
+infra-setup:
+	@echo "$(BLUE)[infra]$(NC) Setting up LocalStack + kind test environment..."
+	@bash $(INFRA_DIR)/bootstrap.sh setup
+
+infra-cleanup:
 	@echo "$(YELLOW)[infra]$(NC) Tearing down test environment..."
 	@bash $(INFRA_DIR)/bootstrap.sh cleanup
 

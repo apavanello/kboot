@@ -38,7 +38,7 @@ check_prereqs() {
     mv /tmp/kind ~/.local/bin/kind
     info "kind installed to ~/.local/bin/kind"
   fi
-  [[ $missing -eq 1 ]] && exit 1
+  if [[ $missing -eq 1 ]]; then exit 1; fi
 }
 
 start_localstack() {
@@ -57,22 +57,29 @@ setup_aws_profile() {
 
   mkdir -p ~/.aws
 
-  # Write credentials
-  cat > ~/.aws/credentials <<CREDS
+  if ! grep -q "^\[$PROFILE_NAME\]" ~/.aws/credentials 2>/dev/null; then
+    cat >> ~/.aws/credentials <<CREDS
 [$PROFILE_NAME]
 aws_access_key_id = test
 aws_secret_access_key = test
 CREDS
+    info "Added '$PROFILE_NAME' to ~/.aws/credentials"
+  else
+    info "Profile '$PROFILE_NAME' already exists in ~/.aws/credentials"
+  fi
 
-  # Write config with endpoint override
-  cat > ~/.aws/config <<AWSCONFIG
+  if ! grep -q "^\[profile $PROFILE_NAME\]" ~/.aws/config 2>/dev/null; then
+    cat >> ~/.aws/config <<AWSCONFIG
+
 [profile $PROFILE_NAME]
 region = $AWS_REGION
 output = json
 endpoint_url = $LOCALSTACK_ENDPOINT
 AWSCONFIG
-
-  info "AWS profile '$PROFILE_NAME' configured with LocalStack endpoint"
+    info "Added '$PROFILE_NAME' to ~/.aws/config"
+  else
+    info "Profile '$PROFILE_NAME' already exists in ~/.aws/config"
+  fi
 }
 
 apply_terraform() {
@@ -106,7 +113,11 @@ setup_kboot_config() {
 
   local kboot_config="$HOME/.kboot.yaml"
 
-  cat > "$kboot_config" <<EOF
+  if [ -f "$kboot_config" ]; then
+    info "kboot config already exists at $kboot_config — skipping"
+    info "To reconfigure, run: kboot config"
+  else
+    cat > "$kboot_config" <<EOF
 clusters:
   - alias: "staging"
     name: "kboot-staging-cluster"
@@ -118,8 +129,8 @@ clusters:
     region: "$AWS_REGION"
     profile: "$PROFILE_NAME"
 EOF
-
-  info "kboot config written to $kboot_config"
+    info "kboot config written to $kboot_config"
+  fi
 
   # Export kind kubeconfigs for direct k9s access
   local kube_dir="$HOME/.kboot/kind"
@@ -168,10 +179,10 @@ cleanup() {
 
   terraform -chdir="$SCRIPT_DIR" destroy -auto-approve -lock=false 2>/dev/null || true
 
-  rm -f "$HOME/.kboot.yaml"
   rm -rf "$HOME/.kboot/kind"
 
   info "Cleanup complete"
+  info "Note: ~/.kboot.yaml and ~/.aws/credentials were NOT removed to preserve your configuration"
 }
 
 case "${1:-setup}" in
