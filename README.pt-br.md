@@ -8,7 +8,6 @@
 
 - [Funcionalidades](#funcionalidades)
 - [Como Funciona](#como-funciona)
-- [Arquitetura](#arquitetura)
 - [Pré-requisitos](#pré-requisitos)
 - [Instalação](#instalação)
 - [Uso](#uso)
@@ -16,6 +15,7 @@
 - [Autenticação](#autenticação)
 - [Comandos CLI](#comandos-cli)
 - [Infraestrutura de Testes](#infraestrutura-de-testes)
+- [Testes](#testes)
 - [Desenvolvimento](#desenvolvimento)
 - [Estrutura do Projeto](#estrutura-do-projeto)
 - [Segurança](#segurança)
@@ -25,12 +25,15 @@
 
 - **Dashboard TUI Unificado** — Gerencie clusters, credenciais estáticas e perfis SSO em uma única interface de terminal construída com [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 - **Autenticação via AWS SDK Puro** — Login SSO e geração de tokens EKS usam exclusivamente AWS SDK Go v2. **Sem dependência de AWS CLI.**
+- **Credenciais AWS Isoladas** — Por padrão, kboot usa `~/.kboot/aws/` para credenciais, config e cache SSO. Seu `~/.aws/` do sistema nunca é tocado. Defina `use_system_aws: true` para usar os arquivos AWS do sistema.
 - **Sincronização Paralela** — Autentica e busca metadados de múltiplos clusters simultaneamente com pool de workers configurável (padrão: 5 workers)
 - **Aliasing de Contexto** — Mapeia ARNs complexos (`arn:aws:eks:us-east-1:123456789012:cluster/prod`) para apelidos curtos e amigáveis (`prod`, `staging`, `dev`)
 - **Zero Poluição** — **Não** modifica seu `~/.kube/config`. Usa arquivos kubeconfig temporários em `/tmp/kboot/` que são limpos após a sessão
-- **Modo Headless** — Gera kubeconfigs e sai sem lançar o k9s, ideal para pipelines CI/CD e scripts
+- **Modo Não-Interativo** — Target um cluster específico com `--cluster <alias>` para scripting e automação
+- **Modo Headless** — Gera kubeconfigs e sai sem lançar o k9s, ideal para pipelines CI/CD
 - **Multi-plataforma** — Funciona em Windows, Linux e macOS
 - **Ambiente de Testes LocalStack** — Infraestrutura completa com Terraform + kind para testar sem tocar em recursos AWS reais
+- **Instalador YOLO** — Setup de todas as dependências e infraestrutura com um comando
 
 ## Como Funciona
 
@@ -50,27 +53,6 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
-## Arquitetura
-
-```
-kboot/
-├── cmd/kboot/main.go          # Entrada CLI, parsing de flags, launch do k9s
-├── internal/
-│   ├── app/
-│   │   └── orchestrator.go    # Worker pool, processamento paralelo
-│   ├── aws/
-│   │   ├── client.go          # Cliente AWS SDK, geração de token EKS (v4 presign)
-│   │   └── sso.go             # Fluxo de autorização de dispositivo SSO OIDC
-│   ├── config/
-│   │   └── config.go          # Parsing e validação de ~/.kboot.yaml
-│   ├── kube/
-│   │   └── generator.go       # Geração de YAML kubeconfig
-│   └── ui/
-│       ├── dashboard.go       # Tela de carregamento com barras de progresso
-│       └── manager.go         # Gerenciamento TUI de clusters/credenciais
-└── infra/                     # Ambiente de teste Terraform + kind
-```
-
 ## Pré-requisitos
 
 | Dependência | Obrigatório | Finalidade |
@@ -82,6 +64,14 @@ kboot/
 > **Nota:** kboot **não** requer a AWS CLI. Todas as interações com AWS usam o AWS SDK Go v2 diretamente, incluindo login SSO via OAuth 2.0 Device Authorization Grant flow.
 
 ## Instalação
+
+### Instalador YOLO (Recomendado)
+
+Instala todas as dependências (Go, Docker, kubectl, kind, Terraform, k9s), compila o kboot, configura LocalStack + clusters kind, e prepara tudo automaticamente:
+
+```bash
+make install-yolo
+```
 
 ### Compilar a partir do Código Fonte
 
@@ -111,7 +101,15 @@ Baixe o binário mais recente em [Releases](https://github.com/apavanello/kboot/
 ./kboot
 ```
 
-Abre a tela de carregamento TUI, autentica em todos os clusters configurados em paralelo, gera kubeconfigs temporários e lança o k9s com todos os clusters acessíveis via troca de contexto.
+Abre a tela de carregamento TUI, autentica em todos os clusters configurados em paralelo, gera kubeconfigs temporários e lança o k9s.
+
+### Target um Cluster Específico
+
+```bash
+./kboot --cluster staging
+```
+
+Pula a seleção TUI e inicia apenas o cluster especificado. Implica `--non-interactive`.
 
 ### Modo Headless (Scripting / CI/CD)
 
@@ -119,41 +117,24 @@ Abre a tela de carregamento TUI, autentica em todos os clusters configurados em 
 ./kboot --headless
 ```
 
-Gera kubeconfigs e imprime o caminho `KUBECONFIG` no stdout. Não lança o k9s. Útil para pipelines:
+Gera kubeconfigs e imprime o caminho `KUBECONFIG` no stdout. Não lança o k9s:
 
 ```bash
 export KUBECONFIG=$(./kboot --headless)
 kubectl get nodes --all-contexts
 ```
 
-### Dashboard de Configuração
+### Modo Não-Interativo
 
 ```bash
-./kboot config
+./kboot --non-interactive
 ```
 
-Abre o gerenciador TUI com três seções:
-
-| Menu | Descrição |
-|------|-----------|
-| **Gerenciar Clusters** | Adicionar, editar, duplicar ou deletar definições de clusters EKS |
-| **Credenciais Estáticas** | Gerenciar perfis em `~/.aws/credentials` diretamente |
-| **Perfis SSO** | Gerenciar perfis de sessão SSO em `~/.aws/config` |
-
-### Teclas de Atalho (Gerenciador TUI)
-
-| Tecla | Ação |
-|-------|------|
-| `a` | Adicionar novo item |
-| `e` / `Enter` | Editar item selecionado |
-| `c` | Duplicar item selecionado |
-| `d` | Deletar item selecionado |
-| `Tab` | Próximo campo |
-| `Shift+Tab` | Campo anterior |
-| `Esc` | Voltar / Cancelar |
-| `q` | Sair |
+Processa todos os clusters configurados sem prompts TUI. Mostra os caminhos dos kubeconfigs ao final.
 
 ## Configuração
+
+### Configuração de Clusters
 
 Os clusters são armazenados em `~/.kboot.yaml`:
 
@@ -177,16 +158,55 @@ clusters:
 | `alias` | Sim | Nome curto e amigável exibido no TUI e usado como contexto k9s |
 | `name` | Sim | Nome real do cluster EKS conforme registrado na AWS |
 | `region` | Sim | Região AWS onde o cluster está implantado |
-| `profile` | Sim | Nome do perfil de credenciais AWS (de `~/.aws/credentials` ou `~/.aws/config`) |
+| `profile` | Sim | Nome do perfil de credenciais AWS |
 | `optional` | Não | Se `true`, o cluster pode ser ignorado no launch sem erro |
+
+### Credenciais AWS Isoladas
+
+Por padrão, o kboot usa seu próprio diretório AWS isolado em `~/.kboot/aws/`:
+
+```
+~/.kboot/
+├── aws/
+│   ├── credentials     # Chaves de acesso AWS
+│   ├── config          # Config AWS com overrides de endpoint
+│   └── sso/cache/      # Cache de tokens SSO
+└── .kboot.yaml         # Definições de clusters
+```
+
+Isso mantém o kboot completamente isolado da configuração `~/.aws/` do seu sistema.
+
+Para usar os arquivos AWS do sistema, adicione ao `~/.kboot.yaml`:
+
+```yaml
+use_system_aws: true
+```
+
+Ou especifique caminhos customizados:
+
+```yaml
+aws_credentials_file: /caminho/para/credentials
+aws_config_file: /caminho/para/config
+aws_sso_cache_dir: /caminho/para/sso/cache
+```
+
+### Configuração via CLI
+
+Adicione clusters diretamente pela linha de comando:
+
+```bash
+kboot config add --alias prod --name meu-cluster --region us-east-1 --profile aws-prod
+kboot config list
+kboot config              # Abre o gerenciador TUI
+```
 
 ## Autenticação
 
-kboot suporta dois métodos de autenticação, ambos tratados inteiramente pelo AWS SDK Go v2:
+O kboot suporta dois métodos de autenticação, ambos tratados inteiramente pelo AWS SDK Go v2:
 
 ### 1. Autenticação SSO (Recomendado)
 
-Quando você configura um perfil SSO em `~/.aws/config`:
+Quando você configura um perfil SSO na sua config AWS:
 
 ```ini
 [profile meu-sso-profile]
@@ -201,7 +221,7 @@ sso_region = us-east-1
 ```
 
 O kboot irá:
-1. Verificar se existe um token SSO válido em `~/.aws/sso/cache/`
+1. Verificar se existe um token SSO válido no cache
 2. Se não, iniciar o fluxo **OAuth 2.0 Device Authorization Grant**
 3. Abrir o navegador na página de login SSO da AWS
 4. Aguardar aprovação do token via polling
@@ -209,7 +229,7 @@ O kboot irá:
 
 ### 2. Credenciais Estáticas
 
-Configure chaves de acesso em `~/.aws/credentials`:
+Configure chaves de acesso no seu arquivo de credenciais:
 
 ```ini
 [aws-prod]
@@ -225,24 +245,24 @@ Para autenticação no kubeconfig, o kboot gera tokens STS `GetCallerIdentity` p
 
 ### `kboot` — Launch
 
-Inicia todos os clusters configurados e lança o k9s.
-
 ```bash
-./kboot                    # Modo interativo com seleção de clusters
-./kboot --headless         # Gera kubeconfigs e sai
+./kboot                           # Modo interativo com seleção de clusters
+./kboot --cluster staging         # Target single cluster
+./kboot --non-interactive         # Processa todos os clusters sem TUI
+./kboot --headless                # Gera kubeconfigs e imprime path
 ```
 
 ### `kboot config` — Gerenciar
 
-Abre o gerenciador de configuração TUI.
-
 ```bash
-./kboot config
+kboot config                      # Abre gerenciador TUI
+kboot config list                 # Lista todos os clusters configurados
+kboot config add --alias X --name Y --region Z --profile P
 ```
 
 ### `kboot token` — Gerar Token de Auth EKS
 
-Comando interno usado como plugin exec do kubeconfig. Gera um token STS pré-assinado para autenticação EKS.
+Comando interno usado como plugin exec do kubeconfig:
 
 ```bash
 ./kboot token --cluster-name meu-cluster --region us-east-1 --profile meu-profile
@@ -267,6 +287,8 @@ O kboot inclui um ambiente de testes completo usando **LocalStack** (AWS mock) e
 make infra           # Inicia LocalStack + cria 2 clusters kind
 make infra-status    # Mostra status atual da infraestrutura
 make infra-cleanup   # Destrói tudo
+make docker-up       # Inicia container LocalStack
+make docker-down     # Para container LocalStack
 ```
 
 O ambiente de teste provisiona:
@@ -277,32 +299,64 @@ O ambiente de teste provisiona:
 
 Veja [`infra/`](infra/) para todos os arquivos de configuração.
 
+## Testes
+
+```bash
+make test              # Testes unitários Go com race detection
+make test-verbose      # Testes unitários com output verboso
+make test-coverage     # Testes unitários com relatório de cobertura
+make test-e2e          # Testes unitários CLI (config CRUD, flags, token)
+make test-integration  # Suite completa de integração (11 fases)
+```
+
+### Fases do Teste de Integração
+
+| Fase | O que Testa |
+|---|---|
+| 1. Build | Binário compila e é executável |
+| 2. Pré-requisitos | Docker, kind, Terraform, kubectl disponíveis |
+| 3. LocalStack | Container rodando, serviço EKS saudável |
+| 4. Terraform EKS | Clusters mock criados no LocalStack |
+| 5. kind Clusters | Clusters Kubernetes reais acessíveis |
+| 6. AWS Isolado | Credenciais e config em `~/.kboot/aws/` |
+| 7. kboot Config | Clusters adicionados e listados via CLI |
+| 8. Não-Interativo | Flags `--cluster` e `--non-interactive` |
+| 9. Geração de Token | Token `k8s-aws-v1.*` com headers assinados |
+| 10. kubectl | Conectividade de nodes e pods em ambos os clusters |
+| 11. Multi-contexto | Kubeconfig combinado com ambos os contextos |
+
 ## Desenvolvimento
 
 ### Targets do Makefile
 
 ```bash
-make build          # Compila para ./bin/kboot
-make run            # Compila e lança
-make install        # Instala em $GOPATH/bin
-make clean          # Remove artefatos de build
+make build           # Compila para ./bin/kboot
+make run             # Compila e lança
+make install         # Instala em $GOPATH/bin
+make clean           # Remove artefatos de build
 
-make fmt            # Formata código com gofmt
-make vet            # Executa go vet
-make lint           # Executa golangci-lint
-make check          # fmt + vet + lint
-make tidy           # Limpa dependências do go.mod
+make fmt             # Formata código com gofmt
+make vet             # Executa go vet
+make lint            # Executa golangci-lint
+make check           # fmt + vet + lint
+make tidy            # Limpa dependências do go.mod
 
-make test           # Executa testes com race detection
-make test-verbose   # Executa testes (output verboso)
-make test-coverage  # Executa testes com relatório de cobertura
+make test            # Executa testes com race detection
+make test-verbose    # Executa testes (output verboso)
+make test-coverage   # Executa testes com relatório de cobertura
+make test-e2e        # Testes unitários CLI
+make test-integration # Suite completa de integração
 
-make infra          # Configura ambiente de teste LocalStack + kind
-make infra-cleanup  # Destrói ambiente de teste
-make docker-up      # Inicia container LocalStack
-make docker-down    # Para container LocalStack
+make install-yolo    # Instalação automática de todas as dependências + infra
 
-make help           # Mostra todos os targets disponíveis
+make infra           # Configura ambiente de teste LocalStack + kind
+make infra-cleanup   # Destrói ambiente de teste
+make infra-status    # Mostra status atual da infra
+make infra-destroy   # Destruição completa (Terraform + kind)
+make docker-up       # Inicia container LocalStack
+make docker-down     # Para container LocalStack
+
+make help            # Mostra todos os targets disponíveis
 ```
 
 ### Estrutura do Projeto
@@ -310,7 +364,7 @@ make help           # Mostra todos os targets disponíveis
 ```
 kboot/
 ├── cmd/kboot/
-│   └── main.go              # Entrada CLI
+│   └── main.go              # Entrada CLI, parsing de flags
 ├── internal/
 │   ├── app/
 │   │   └── orchestrator.go  # Worker pool paralelo
@@ -318,7 +372,7 @@ kboot/
 │   │   ├── client.go        # Cliente AWS SDK + geração de token EKS
 │   │   └── sso.go           # Autorização de dispositivo SSO OIDC
 │   ├── config/
-│   │   └── config.go        # Carregamento de configuração
+│   │   └── config.go        # Carregamento de config + paths AWS isolados
 │   ├── kube/
 │   │   └── generator.go     # Geração de kubeconfig
 │   └── ui/
@@ -332,6 +386,10 @@ kboot/
 │   ├── docker-compose.yml   # Container LocalStack
 │   ├── kind-staging.yaml    # Config cluster kind staging
 │   └── kind-production.yaml # Config cluster kind production
+├── scripts/
+│   ├── install.sh           # Instalador YOLO
+│   ├── test-e2e.sh          # Testes unitários CLI
+│   └── test-integration.sh  # Suite completa de integração
 ├── Makefile
 ├── go.mod
 ├── .kboot.yaml.example
@@ -341,9 +399,10 @@ kboot/
 
 ## Segurança
 
-- **Sem armazenamento de credenciais** — O kboot nunca armazena chaves de acesso ou segredos AWS. Todo o gerenciamento de credenciais é delegado ao AWS SDK e aos arquivos padrão `~/.aws/`.
+- **Sem armazenamento de credenciais** — O kboot nunca armazena chaves de acesso ou segredos AWS. Todo o gerenciamento de credenciais é delegado ao AWS SDK e aos arquivos padrão AWS.
+- **Isolado por padrão** — O kboot usa `~/.kboot/aws/` para todos os arquivos AWS, deixando seu `~/.aws/` do sistema intocado.
 - **Kubeconfigs temporários** — Os arquivos kubeconfig gerados são armazenados em `/tmp/kboot/` e limpos após a sessão. Seu `~/.kube/config` nunca é modificado.
-- **Cache de tokens SSO** — Tokens SSO são armazenados em `~/.aws/sso/cache/` com permissões adequadas (0600) e rastreamento de expiração, seguindo o formato padrão do AWS SDK.
+- **Cache de tokens SSO** — Tokens SSO são armazenados com permissões adequadas (0600) e rastreamento de expiração, seguindo o formato padrão do AWS SDK.
 - **Tokens pré-assinados** — Tokens de autenticação EKS são gerados via requisições STS pré-assinadas com expiração de 60 segundos, minimizando a janela para ataques de replay.
 - **Sem injeção de shell** — Todas as interações com AWS usam o SDK diretamente. Sem chamadas de subprocesso para a CLI `aws`, eliminando vetores de injeção de shell.
 
