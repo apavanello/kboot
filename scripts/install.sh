@@ -13,8 +13,15 @@ info()  { echo -e "${BLUE}→${NC} $*"; }
 warn()  { echo -e "${YELLOW}!${NC} $*"; }
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN_DIR="/usr/local/bin"
+BIN_DIR="$HOME/.local/bin"
 KBOOT_BIN="$PROJECT_DIR/bin/kboot"
+
+ensure_bin_dir() {
+    mkdir -p "$BIN_DIR"
+    if ! echo "$PATH" | grep -q "$BIN_DIR"; then
+        export PATH="$BIN_DIR:$PATH"
+    fi
+}
 
 install_go() {
     if command -v go &>/dev/null; then
@@ -35,9 +42,9 @@ install_kubectl() {
         return
     fi
     info "Installing kubectl..."
-    curl -fsSL "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" -o /tmp/kubectl
-    chmod +x /tmp/kubectl
-    mv /tmp/kubectl "$BIN_DIR/kubectl"
+    ensure_bin_dir
+    curl -fsSL "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" -o "$BIN_DIR/kubectl"
+    chmod +x "$BIN_DIR/kubectl"
     pass "kubectl installed"
 }
 
@@ -47,9 +54,9 @@ install_kind() {
         return
     fi
     info "Installing kind..."
-    curl -fsSL "https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64" -o /tmp/kind
-    chmod +x /tmp/kind
-    mv /tmp/kind "$BIN_DIR/kind"
+    ensure_bin_dir
+    curl -fsSL "https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64" -o "$BIN_DIR/kind"
+    chmod +x "$BIN_DIR/kind"
     pass "kind installed"
 }
 
@@ -59,6 +66,7 @@ install_terraform() {
         return
     fi
     info "Installing Terraform..."
+    ensure_bin_dir
     curl -fsSL "https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip" -o /tmp/terraform.zip
     unzip -o /tmp/terraform.zip -d /tmp/terraform
     mv /tmp/terraform/terraform "$BIN_DIR/terraform"
@@ -72,6 +80,7 @@ install_k9s() {
         return
     fi
     info "Installing k9s..."
+    ensure_bin_dir
     curl -fsSL "https://github.com/derailed/k9s/releases/download/v0.32.7/k9s_Linux_amd64.tar.gz" -o /tmp/k9s.tar.gz
     tar -xzf /tmp/k9s.tar.gz -C /tmp/ k9s
     mv /tmp/k9s "$BIN_DIR/k9s"
@@ -222,6 +231,7 @@ main() {
     echo -e "${BLUE}╚══════════════════════════════════════════════╝${NC}"
     echo ""
     
+    ensure_bin_dir
     install_go
     install_docker
     install_kubectl

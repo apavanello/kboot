@@ -39,8 +39,9 @@ run: build
 	$(BUILD_DIR)/$(BINARY_NAME) $(filter-out $@,$(MAKECMDGOALS))
 
 install: build
-	@printf '\033[0;34m[install]\033[0m Installing $(BINARY_NAME) to $$GOPATH/bin...\n'
-	cp $(BUILD_DIR)/$(BINARY_NAME) $$($(GO) env GOPATH)/bin/$(BINARY_NAME)
+	@printf '\033[0;34m[install]\033[0m Installing $(BINARY_NAME) to ~/.local/bin...\n'
+	@mkdir -p $$HOME/.local/bin
+	cp $(BUILD_DIR)/$(BINARY_NAME) $$HOME/.local/bin/$(BINARY_NAME)
 
 clean:
 	@printf '\033[0;34m[clean]\033[0m Removing build artifacts...\n'
