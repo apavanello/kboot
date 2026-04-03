@@ -24,8 +24,8 @@ type Event struct {
 	ClusterAlias string
 	Type         EventType
 	Message      string
-	Result       *aws.ClusterInfo // Populated on Success
-	Err          error            // Populated on Error
+	Result       *aws.ClusterInfo
+	Err          error
 }
 
 // Orchestrator manages the boot process
@@ -54,7 +54,6 @@ func (o *Orchestrator) Run(ctx context.Context, eventChan chan<- Event) map[stri
 	results := make(map[string]Result)
 	var mu sync.Mutex
 
-	// Semaphore
 	sem := make(chan struct{}, o.MaxWorkers)
 	var wg sync.WaitGroup
 
@@ -64,11 +63,9 @@ func (o *Orchestrator) Run(ctx context.Context, eventChan chan<- Event) map[stri
 		go func(c config.Cluster) {
 			defer wg.Done()
 
-			// Wait for slot
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			// Notify Start
 			if eventChan != nil {
 				eventChan <- Event{ClusterAlias: c.Alias, Type: EventStart, Message: "Authenticating..."}
 			}
@@ -78,7 +75,6 @@ func (o *Orchestrator) Run(ctx context.Context, eventChan chan<- Event) map[stri
 
 			res := o.processCluster(workerCtx, c)
 
-			// Notify Finish
 			if eventChan != nil {
 				if res.Error != nil {
 					eventChan <- Event{ClusterAlias: c.Alias, Type: EventError, Message: res.Error.Error(), Err: res.Error}
@@ -109,19 +105,26 @@ func (o *Orchestrator) processCluster(ctx context.Context, c config.Cluster) Res
 	// 1. Check Identity
 	_, err = client.CheckIdentity(ctx)
 	if err != nil {
-		// 2. Login
+		// 2. SSO Login
 		if loginErr := aws.SSOLoginProfile(ctx, c.Profile); loginErr != nil {
-			res.Error = fmt.Errorf("login failed: %v", loginErr)
+			res.Error = fmt.Errorf("login failed: %w", loginErr)
+			return res
+		}
+
+		// 3. Recreate client to pick up fresh credentials
+		client, err = aws.NewClient(ctx, c.Profile, c.Region)
+		if err != nil {
+			res.Error = fmt.Errorf("client reinit after login: %w", err)
 			return res
 		}
 
 		if _, err := client.CheckIdentity(ctx); err != nil {
-			res.Error = fmt.Errorf("verify failed: %w", err)
+			res.Error = fmt.Errorf("verify failed after login: %w", err)
 			return res
 		}
 	}
 
-	// 3. Describe
+	// 4. Describe Cluster
 	info, err := client.DescribeCluster(ctx, c.Name)
 	if err != nil {
 		res.Error = fmt.Errorf("describe error: %w", err)

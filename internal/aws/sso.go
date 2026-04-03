@@ -19,6 +19,16 @@ import (
 	ssooidctypes "github.com/aws/aws-sdk-go-v2/service/ssooidc/types"
 )
 
+const ssoSessionPrefix = "[sso-session "
+
+func userHomeDir() string {
+	dir, err := os.UserHomeDir()
+	if err != nil {
+		return os.Getenv("HOME")
+	}
+	return dir
+}
+
 // SSOLogin performs SSO login using the AWS SDK device authorization flow.
 func SSOLogin(ctx context.Context, ssoSession string) error {
 	cfg, err := config.LoadDefaultConfig(ctx)
@@ -42,7 +52,7 @@ func SSOLoginProfile(ctx context.Context, profile string) error {
 func doSSOLogin(ctx context.Context, cfg aws.Config, identifier string) error {
 	ssoSession, ssoStartURL, ssoRegion, err := resolveSSOConfig(identifier)
 	if err != nil {
-		return err
+		return fmt.Errorf("SSO config resolution: %w", err)
 	}
 
 	oidcClient := ssooidc.NewFromConfig(cfg, func(o *ssooidc.Options) {
@@ -86,17 +96,18 @@ func doSSOLogin(ctx context.Context, cfg aws.Config, identifier string) error {
 }
 
 func resolveSSOConfig(identifier string) (session, startURL, region string, err error) {
-	home := os.Getenv("HOME")
+	home := userHomeDir()
 	configPath := filepath.Join(home, ".aws", "config")
 	data, readErr := os.ReadFile(configPath)
 	if readErr != nil {
 		return "", "", "", fmt.Errorf("cannot read %s: %w", configPath, readErr)
 	}
 
-	ssoSessions := parseSSOSessions(string(data))
+	content := string(data)
+	ssoSessions := parseSSOSessions(content)
 
 	profileSection := fmt.Sprintf("[profile %s]", identifier)
-	ssoSessionName, profileStartURL, profileRegion := parseProfileSection(string(data), profileSection)
+	ssoSessionName, profileStartURL, profileRegion := parseProfileSection(content, profileSection)
 
 	if profileStartURL != "" && profileRegion != "" {
 		return identifier, profileStartURL, profileRegion, nil
@@ -130,11 +141,11 @@ func parseSSOSessions(content string) map[string]ssoSessionInfo {
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[sso-session ") && strings.HasSuffix(trimmed, "]") {
+		if strings.HasPrefix(trimmed, ssoSessionPrefix) && strings.HasSuffix(trimmed, "]") {
 			if currentName != "" {
 				sessions[currentName] = info
 			}
-			currentName = trimmed[13 : len(trimmed)-1]
+			currentName = trimmed[len(ssoSessionPrefix) : len(trimmed)-1]
 			info = ssoSessionInfo{}
 			continue
 		}
@@ -207,7 +218,7 @@ func parseProfileSection(content, sectionName string) (ssoSession, startURL, reg
 }
 
 func getOrCreateSSOClient(ctx context.Context, client *ssooidc.Client, ssoSession string) (clientID, clientSecret string, err error) {
-	cachePath := filepath.Join(os.Getenv("HOME"), ".aws", "sso", "cache", ssoSession+"-client.json")
+	cachePath := filepath.Join(userHomeDir(), ".aws", "sso", "cache", ssoSession+"-client.json")
 
 	if data, err := os.ReadFile(cachePath); err == nil {
 		var cached struct {
@@ -232,15 +243,22 @@ func getOrCreateSSOClient(ctx context.Context, client *ssooidc.Client, ssoSessio
 	clientSecret = aws.ToString(registered.ClientSecret)
 	expiresAt := time.Now().Add(24 * time.Hour)
 
-	cacheData, _ := json.Marshal(map[string]any{
+	cacheData, err := json.Marshal(map[string]any{
 		"clientId":              clientID,
 		"clientSecret":          clientSecret,
 		"expiresAt":             expiresAt,
 		"clientSecretExpiresAt": expiresAt,
 	})
+	if err != nil {
+		return "", "", fmt.Errorf("marshal client cache: %w", err)
+	}
 
-	os.MkdirAll(filepath.Dir(cachePath), 0700)
-	os.WriteFile(cachePath, cacheData, 0600)
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0700); err != nil {
+		return "", "", fmt.Errorf("create cache dir: %w", err)
+	}
+	if err := os.WriteFile(cachePath, cacheData, 0600); err != nil {
+		return "", "", fmt.Errorf("write client cache: %w", err)
+	}
 
 	return clientID, clientSecret, nil
 }
@@ -292,9 +310,9 @@ func pollForToken(ctx context.Context, client *ssooidc.Client, clientID, clientS
 }
 
 func writeSSOTokenCache(ssoSession, startURL, region, accessToken, clientID, clientSecret string, expiresIn int32) error {
-	cacheDir := filepath.Join(os.Getenv("HOME"), ".aws", "sso", "cache")
+	cacheDir := filepath.Join(userHomeDir(), ".aws", "sso", "cache")
 	if err := os.MkdirAll(cacheDir, 0700); err != nil {
-		return err
+		return fmt.Errorf("create cache dir: %w", err)
 	}
 
 	expiresAt := time.Now().Add(time.Duration(expiresIn) * time.Second)
@@ -314,7 +332,10 @@ func writeSSOTokenCache(ssoSession, startURL, region, accessToken, clientID, cli
 	}
 
 	path := filepath.Join(cacheDir, cacheFile)
-	data, _ := json.MarshalIndent(tokenData, "", "  ")
+	data, err := json.MarshalIndent(tokenData, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal token cache: %w", err)
+	}
 	return os.WriteFile(path, data, 0600)
 }
 

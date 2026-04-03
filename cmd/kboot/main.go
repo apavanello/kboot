@@ -21,6 +21,17 @@ import (
 	"kboot/internal/ui"
 )
 
+// execCredential matches the Kubernetes client.authentication.k8s.io/v1beta1 API
+type execCredential struct {
+	Kind       string          `json:"kind"`
+	APIVersion string          `json:"apiVersion"`
+	Status     execCredStatus  `json:"status"`
+}
+
+type execCredStatus struct {
+	Token string `json:"token"`
+}
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -141,11 +152,11 @@ func handleTokenCommand(args []string) {
 		os.Exit(1)
 	}
 
-	output := map[string]any{
-		"kind":       "ExecCredential",
-		"apiVersion": "client.authentication.k8s.io/v1beta1",
-		"status": map[string]any{
-			"token": token,
+	output := execCredential{
+		Kind:       "ExecCredential",
+		APIVersion: "client.authentication.k8s.io/v1beta1",
+		Status: execCredStatus{
+			Token: token,
 		},
 	}
 
@@ -169,8 +180,13 @@ func runTool(toolName string, kubeconfigEnv string) {
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		cmd.Run()
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error running %s: %v\n", toolName, err)
+		}
 	} else {
-		syscall.Exec(toolPath, []string{toolName}, env)
+		if err := syscall.Exec(toolPath, []string{toolName}, env); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to exec %s: %v\n", toolName, err)
+			os.Exit(1)
+		}
 	}
 }

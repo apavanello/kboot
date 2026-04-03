@@ -2,9 +2,7 @@ package aws
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"time"
@@ -49,10 +47,12 @@ func NewClient(ctx context.Context, profile, region string) (*Client, error) {
 
 // CheckIdentity verifies if the current credentials are valid
 func (c *Client) CheckIdentity(ctx context.Context) (string, error) {
-	input := &sts.GetCallerIdentityInput{}
-	out, err := c.STSClient.GetCallerIdentity(ctx, input)
+	out, err := c.STSClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 	if err != nil {
 		return "", fmt.Errorf("failed to get caller identity: %w", err)
+	}
+	if out.Arn == nil {
+		return "", fmt.Errorf("caller identity returned nil ARN")
 	}
 	return *out.Arn, nil
 }
@@ -67,11 +67,9 @@ type ClusterInfo struct {
 
 // DescribeCluster fetches cluster details
 func (c *Client) DescribeCluster(ctx context.Context, clusterName string) (*ClusterInfo, error) {
-	input := &eks.DescribeClusterInput{
+	out, err := c.EKSClient.DescribeCluster(ctx, &eks.DescribeClusterInput{
 		Name: aws.String(clusterName),
-	}
-
-	out, err := c.EKSClient.DescribeCluster(ctx, input)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to describe cluster %s: %w", clusterName, err)
 	}
@@ -80,11 +78,21 @@ func (c *Client) DescribeCluster(ctx context.Context, clusterName string) (*Clus
 		return nil, fmt.Errorf("cluster %s not found", clusterName)
 	}
 
+	if out.Cluster.Endpoint == nil {
+		return nil, fmt.Errorf("cluster %s has no endpoint", clusterName)
+	}
+	if out.Cluster.CertificateAuthority == nil || out.Cluster.CertificateAuthority.Data == nil {
+		return nil, fmt.Errorf("cluster %s has no certificate authority data", clusterName)
+	}
+	if out.Cluster.Arn == nil {
+		return nil, fmt.Errorf("cluster %s has no ARN", clusterName)
+	}
+
 	return &ClusterInfo{
-		Name:     *out.Cluster.Name,
-		Endpoint: *out.Cluster.Endpoint,
-		CAData:   *out.Cluster.CertificateAuthority.Data,
-		ARN:      *out.Cluster.Arn,
+		Name:     aws.ToString(out.Cluster.Name),
+		Endpoint: aws.ToString(out.Cluster.Endpoint),
+		CAData:   aws.ToString(out.Cluster.CertificateAuthority.Data),
+		ARN:      aws.ToString(out.Cluster.Arn),
 	}, nil
 }
 
@@ -162,12 +170,4 @@ func generateEKSToken(ctx context.Context, cfg aws.Config, clusterName string) (
 	token := eksTokenPrefix + base64.RawURLEncoding.EncodeToString([]byte(signedURL))
 
 	return token, nil
-}
-
-func payloadHash(body interface{}) string {
-	if body == nil {
-		hash := sha256.Sum256([]byte{})
-		return hex.EncodeToString(hash[:])
-	}
-	return emptyBodyHash
 }
