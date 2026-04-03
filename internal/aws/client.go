@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -136,7 +135,7 @@ func generateEKSToken(ctx context.Context, cfg aws.Config, clusterName string) (
 		return "", fmt.Errorf("failed to retrieve credentials: %w", err)
 	}
 
-	stsURL := fmt.Sprintf("https://sts.%s.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15", cfg.Region)
+	stsURL := fmt.Sprintf("https://sts.%s.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15&X-Amz-Expires=%d", cfg.Region, eksTokenExpiration)
 
 	req, err := http.NewRequest(http.MethodGet, stsURL, nil)
 	if err != nil {
@@ -160,16 +159,7 @@ func generateEKSToken(ctx context.Context, cfg aws.Config, clusterName string) (
 		return "", fmt.Errorf("failed to presign request: %w", err)
 	}
 
-	parsed, err := url.Parse(signedURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse signed URL: %w", err)
-	}
-
-	q := parsed.Query()
-	q.Set("X-Amz-Expires", "60")
-	parsed.RawQuery = q.Encode()
-
-	token := eksTokenPrefix + base64.RawURLEncoding.EncodeToString([]byte(parsed.String()))
+	token := eksTokenPrefix + base64.RawURLEncoding.EncodeToString([]byte(signedURL))
 
 	return token, nil
 }
