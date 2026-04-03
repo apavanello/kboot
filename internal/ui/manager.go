@@ -691,6 +691,82 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.form.Init()
 				}
 			}
+
+			if key.Matches(msg, keyDuplicate) {
+				if len(m.staticCreds) == 0 {
+					m.status = "Nenhuma credencial para duplicar"
+					return m, nil
+				}
+				idx := m.credList.Index()
+				if idx >= 0 && idx < len(m.staticCreds) {
+					cred := m.staticCreds[idx]
+					newProfile := cred.ProfileName + "-copy"
+					home, _ := getHomeDir()
+					credPath := filepath.Join(home, ".aws", "credentials")
+					oldEp := loadEndpointForProfile(cred.ProfileName)
+
+					content := fmt.Sprintf("\n[%s]\naws_access_key_id = %s\naws_secret_access_key = %s\n",
+						newProfile, cred.AccessKey, cred.SecretKey)
+					if cred.Token != "" {
+						content += fmt.Sprintf("aws_session_token = %s\n", cred.Token)
+					}
+					appendToFile(credPath, content)
+
+					if oldEp != "" {
+						configPath := filepath.Join(home, ".aws", "config")
+						profileBlock := fmt.Sprintf("\n[profile %s]\nendpoint_url = %s\n",
+							newProfile, oldEp)
+						appendToFile(configPath, profileBlock)
+					}
+
+					m.status = fmt.Sprintf("Duplicado '%s' → '%s'", cred.ProfileName, newProfile)
+					m.staticCreds = loadStaticCredentials()
+					items := make([]list.Item, len(m.staticCreds))
+					for i, c := range m.staticCreds {
+						items[i] = c
+					}
+					m.credList.SetItems(items)
+					return m, nil
+				}
+			}
+
+			if key.Matches(msg, keyDuplicate) {
+				if len(m.staticCreds) == 0 {
+					m.status = "Nenhuma credencial para duplicar"
+					return m, nil
+				}
+				idx := m.credList.Index()
+				if idx >= 0 && idx < len(m.staticCreds) {
+					cred := m.staticCreds[idx]
+					newProfile := cred.ProfileName + "-copy"
+					home, _ := getHomeDir()
+					credPath := filepath.Join(home, ".aws", "credentials")
+					oldEp := loadEndpointForProfile(cred.ProfileName)
+
+					content := fmt.Sprintf("\n[%s]\naws_access_key_id = %s\naws_secret_access_key = %s\n",
+						newProfile, cred.AccessKey, cred.SecretKey)
+					if cred.Token != "" {
+						content += fmt.Sprintf("aws_session_token = %s\n", cred.Token)
+					}
+					appendToFile(credPath, content)
+
+					if oldEp != "" {
+						configPath := filepath.Join(home, ".aws", "config")
+						profileBlock := fmt.Sprintf("\n[profile %s]\nendpoint_url = %s\n",
+							newProfile, oldEp)
+						appendToFile(configPath, profileBlock)
+					}
+
+					m.status = fmt.Sprintf("Duplicado '%s' → '%s'", cred.ProfileName, newProfile)
+					m.staticCreds = loadStaticCredentials()
+					items := make([]list.Item, len(m.staticCreds))
+					for i, c := range m.staticCreds {
+						items[i] = c
+					}
+					m.credList.SetItems(items)
+					return m, nil
+				}
+			}
 		}
 		m.credList, cmd = m.credList.Update(msg)
 		return m, cmd
@@ -845,6 +921,33 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					)
 					m.view = viewSSODeleteConfirm
 					return m, m.form.Init()
+				}
+			}
+
+			if key.Matches(msg, keyDuplicate) {
+				if len(m.ssoProfiles) == 0 {
+					m.status = "Nenhum perfil SSO para duplicar"
+					return m, nil
+				}
+				idx := m.credList.Index()
+				if idx >= 0 && idx < len(m.ssoProfiles) {
+					p := m.ssoProfiles[idx]
+					newProfile := p.ProfileName + "-copy"
+					home, _ := getHomeDir()
+					configPath := filepath.Join(home, ".aws", "config")
+
+					content := fmt.Sprintf("\n[profile %s]\nsso_session = %s\nsso_account_id = %s\nsso_role_name = %s\nregion = %s\n",
+						newProfile, p.SSOSession, p.AccountID, p.RoleName, p.Region)
+					appendToFile(configPath, content)
+
+					m.status = fmt.Sprintf("Duplicado '%s' → '%s'", p.ProfileName, newProfile)
+					m.ssoProfiles = loadSSOProfiles()
+					items := make([]list.Item, len(m.ssoProfiles))
+					for i, c := range m.ssoProfiles {
+						items[i] = c
+					}
+					m.credList.SetItems(items)
+					return m, nil
 				}
 			}
 		}
@@ -1207,4 +1310,3 @@ func deleteEndpointForProfile(profileName string) bool {
 	}
 	return deleted
 }
-
