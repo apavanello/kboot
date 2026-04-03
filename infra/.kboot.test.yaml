@@ -1,0 +1,12 @@
+clusters:
+  - alias: "staging"
+    name: "kboot-staging-cluster"
+    region: "us-east-1"
+    profile: "localstack"
+    optional: false
+
+  - alias: "production"
+    name: "kboot-production-cluster"
+    region: "us-east-1"
+    profile: "localstack"
+    optional: false

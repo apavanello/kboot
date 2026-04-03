@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -14,22 +15,27 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"kboot/internal/app"
+	"kboot/internal/aws"
 	"kboot/internal/config"
 	"kboot/internal/kube"
 	"kboot/internal/ui"
 )
 
 func main() {
-	// 0. Check CLI commands (config)
-	if len(os.Args) > 1 && os.Args[1] == "config" {
-		ui.RunManager()
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "config":
+			ui.RunManager()
+			return
+		case "token":
+			handleTokenCommand(os.Args[2:])
+			return
+		}
 	}
 
 	headlessFunc := flag.Bool("headless", false, "Generate kubeconfigs and exit without launching k9s")
 	flag.Parse()
 
-	// 1. Load Config
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
@@ -41,10 +47,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	// 1.5. Check for interactively enabled clusters (Optional flow)
-	// Only run interactive prompt if not headless (headless defaults to all? or none?
-	// Usually headless implies automation, so maybe we skip options or boot all.
-	// Let's assume headless boots ALL unless we add a flag. For now, prompt only in UI mode)
 	if !*headlessFunc {
 		finalClusters, err := ui.PromptOptionalClusters(cfg.Clusters)
 		if err != nil {
@@ -53,37 +55,28 @@ func main() {
 		}
 		cfg.Clusters = finalClusters
 	}
-	// Note: In headless mode, we currently process ALL clusters (including optional ones) as "mandatory".
-	// Features like --include-optional could be added later.
 
 	if len(cfg.Clusters) == 0 {
 		fmt.Println("No clusters selected for boot.")
 		os.Exit(0)
 	}
 
-	// 2. Prepare Communication
-	// Channel for worker -> UI
 	eventChan := make(chan app.Event, len(cfg.Clusters)*2)
 
-	// Orchestrator
 	orchestrator := app.NewOrchestrator(cfg)
 	ctx := context.Background()
 
 	var results map[string]app.Result
 
-	// 3. UI or Headless?
 	if *headlessFunc {
-		// Headless: Just wait for results, no UI
-		close(eventChan)                     // Not using UI channel for processing
-		results = orchestrator.Run(ctx, nil) // Handle nil chan in orchestrator
+		close(eventChan)
+		results = orchestrator.Run(ctx, nil)
 	} else {
-		// UI Mode
 		p := tea.NewProgram(ui.NewLoadingModel(cfg, eventChan))
 
-		// Run orchestrator in BG
 		go func() {
 			results = orchestrator.Run(ctx, eventChan)
-			p.Send(true) // Signal done to UI
+			p.Send(true)
 		}()
 
 		if _, err := p.Run(); err != nil {
@@ -92,7 +85,6 @@ func main() {
 		}
 	}
 
-	// 4. Process Results (Same as before)
 	tempDir := filepath.Join(os.TempDir(), "kboot")
 	os.RemoveAll(tempDir)
 
@@ -120,7 +112,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 5. Handle Headless or Launch
 	kubeconfigEnv := strings.Join(validPaths, string(filepath.ListSeparator))
 
 	if *headlessFunc {
@@ -128,8 +119,38 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Launch K9s
 	runTool("k9s", kubeconfigEnv)
+}
+
+func handleTokenCommand(args []string) {
+	fs := flag.NewFlagSet("token", flag.ExitOnError)
+	clusterName := fs.String("cluster-name", "", "EKS cluster name")
+	region := fs.String("region", "", "AWS region")
+	profile := fs.String("profile", "", "AWS profile")
+	fs.Parse(args)
+
+	if *clusterName == "" || *region == "" || *profile == "" {
+		fmt.Fprintf(os.Stderr, "Error: --cluster-name, --region, and --profile are required\n")
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+	token, err := aws.GenerateEKSToken(ctx, *profile, *region, *clusterName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating EKS token: %v\n", err)
+		os.Exit(1)
+	}
+
+	output := map[string]any{
+		"kind":       "ExecCredential",
+		"apiVersion": "client.authentication.k8s.io/v1beta1",
+		"status": map[string]any{
+			"token": token,
+		},
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.Encode(output)
 }
 
 func runTool(toolName string, kubeconfigEnv string) {
@@ -150,7 +171,6 @@ func runTool(toolName string, kubeconfigEnv string) {
 		cmd.Stderr = os.Stderr
 		cmd.Run()
 	} else {
-		// Replace process
 		syscall.Exec(toolPath, []string{toolName}, env)
 	}
 }

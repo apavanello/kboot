@@ -2,12 +2,26 @@ package aws
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"net/http"
+	"net/url"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+)
+
+const (
+	eksTokenPrefix     = "k8s-aws-v1."
+	eksTokenExpiration = 60
+	clusterIDHeader    = "x-k8s-aws-id"
+	emptyBodyHash      = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 )
 
 // Client wraps AWS SDK clients
@@ -19,7 +33,6 @@ type Client struct {
 
 // NewClient initializes AWS clients for a specific profile and region
 func NewClient(ctx context.Context, profile, region string) (*Client, error) {
-	// Load AWS config with specific profile
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithSharedConfigProfile(profile),
 		config.WithRegion(region),
@@ -74,4 +87,97 @@ func (c *Client) DescribeCluster(ctx context.Context, clusterName string) (*Clus
 		CAData:   *out.Cluster.CertificateAuthority.Data,
 		ARN:      *out.Cluster.Arn,
 	}, nil
+}
+
+// GetEKSToken generates a presigned STS GetCallerIdentity token for EKS authentication.
+func (c *Client) GetEKSToken(ctx context.Context, clusterName string) (string, error) {
+	return generateEKSToken(ctx, c.Config, clusterName)
+}
+
+// GetCredentials retrieves temporary credentials for the current profile.
+func (c *Client) GetCredentials(ctx context.Context) (*Credentials, error) {
+	creds, err := c.Config.Credentials.Retrieve(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve credentials: %w", err)
+	}
+
+	return &Credentials{
+		AccessKeyID:     creds.AccessKeyID,
+		SecretAccessKey: creds.SecretAccessKey,
+		SessionToken:    creds.SessionToken,
+		Expires:         creds.Expires,
+	}, nil
+}
+
+// Credentials holds AWS credential data
+type Credentials struct {
+	AccessKeyID     string
+	SecretAccessKey string
+	SessionToken    string
+	Expires         time.Time
+}
+
+// GenerateEKSToken is a standalone function that creates an EKS auth token
+// without requiring a full Client instance. Used by kubeconfig generator.
+func GenerateEKSToken(ctx context.Context, profile, region, clusterName string) (string, error) {
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithSharedConfigProfile(profile),
+		config.WithRegion(region),
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to load config: %w", err)
+	}
+	return generateEKSToken(ctx, cfg, clusterName)
+}
+
+func generateEKSToken(ctx context.Context, cfg aws.Config, clusterName string) (string, error) {
+	creds, err := cfg.Credentials.Retrieve(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to retrieve credentials: %w", err)
+	}
+
+	stsURL := fmt.Sprintf("https://sts.%s.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15", cfg.Region)
+
+	req, err := http.NewRequest(http.MethodGet, stsURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to build request: %w", err)
+	}
+
+	req.Header.Set(clusterIDHeader, clusterName)
+
+	signer := v4.NewSigner()
+
+	signedURL, _, err := signer.PresignHTTP(
+		ctx,
+		creds,
+		req,
+		emptyBodyHash,
+		"sts",
+		cfg.Region,
+		time.Now(),
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to presign request: %w", err)
+	}
+
+	parsed, err := url.Parse(signedURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse signed URL: %w", err)
+	}
+
+	q := parsed.Query()
+	q.Set("X-Amz-Expires", "60")
+	parsed.RawQuery = q.Encode()
+
+	token := eksTokenPrefix + base64.RawURLEncoding.EncodeToString([]byte(parsed.String()))
+
+	return token, nil
+}
+
+func payloadHash(body interface{}) string {
+	if body == nil {
+		hash := sha256.Sum256([]byte{})
+		return hex.EncodeToString(hash[:])
+	}
+	return emptyBodyHash
 }

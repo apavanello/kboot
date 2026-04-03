@@ -3,6 +3,7 @@ package kube
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"kboot/internal/aws"
@@ -10,7 +11,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// KubeConfig structure for generating kubeconfig files native in Go
 type KubeConfig struct {
 	APIVersion     string          `yaml:"apiVersion"`
 	Kind           string          `yaml:"kind"`
@@ -62,11 +62,20 @@ type KEnv struct {
 	Value string `yaml:"value"`
 }
 
-// Generate writes a single kubeconfig file for the given cluster
 func Generate(dir string, alias string, info *aws.ClusterInfo, region, profile string) (string, error) {
-	// Create directory if not exists
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create temp dir: %w", err)
+	}
+
+	kbootPath, execErr := os.Executable()
+	if execErr != nil {
+		kbootPath = "kboot"
+	} else if filepath.Base(kbootPath) != "kboot" {
+		if looked, err := exec.LookPath("kboot"); err == nil {
+			kbootPath = looked
+		} else {
+			kbootPath = "kboot"
+		}
 	}
 
 	kc := KubeConfig{
@@ -97,12 +106,12 @@ func Generate(dir string, alias string, info *aws.ClusterInfo, region, profile s
 				User: KUser{
 					Exec: KExec{
 						APIVersion: "client.authentication.k8s.io/v1beta1",
-						Command:    "aws",
+						Command:    kbootPath,
 						Args: []string{
-							"eks", "get-token",
+							"token",
 							"--cluster-name", info.Name,
 							"--region", region,
-							"--profile", profile, // Critical: Embed profile to keep auth working in k9s
+							"--profile", profile,
 						},
 					},
 				},

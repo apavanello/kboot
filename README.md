@@ -5,7 +5,7 @@
 ## Features
 
 - **Unified TUI Dashboard** (v2.3): Manage clusters and AWS credentials from a single, intuitive terminal interface
-- **Smart Authentication**: Automatically validates SSO sessions and runs `aws sso login` when needed
+- **Smart Authentication**: Automatically validates SSO sessions using pure AWS SDK (no AWS CLI required)
 - **Parallel Sync**: Generates kubeconfigs for multiple clusters simultaneously
 - **Context Aliasing**: Maps complex AWS ARNs to short, friendly aliases (e.g., `prod`, `staging`)
 - **Zero Pollution**: Does **not** modify your `~/.kube/config`. Uses temporary configs for the session
@@ -15,7 +15,6 @@
 
 ### Prerequisites
 - Go 1.21+
-- AWS CLI v2
 - `k9s` (recommended)
 
 ### Build from Source

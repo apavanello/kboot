@@ -12,7 +12,7 @@
 - **Relatório de Falhas:** Ao final da execução, o CLI deve apresentar explicitamente (stderr ou warning colorido) quais clusters/contas falharam e o motivo resumido, garantindo que o usuário saiba que falta algo.
 
 ## 4. Segurança
-- **Persistência Segura:** Nenhuma credencial (Access Key/Secret) deve ser salva em texto puro pelo kboot. Delegar toda a gestão de tokens para o `aws-cli` e o padrão `~/.aws/config`.
+- **Persistência Segura:** Nenhuma credencial (Access Key/Secret) deve ser salva em texto puro pelo kboot. Toda a gestão de tokens é feita via AWS SDK Go v2 e o padrão `~/.aws/config`.
 
 ## 5. Compatibilidade
 - **Go Version:** Manter compatibilidade com Go 1.21+.
