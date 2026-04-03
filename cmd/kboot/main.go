@@ -21,6 +21,12 @@ import (
 	"kboot/internal/ui"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 // execCredential matches the Kubernetes client.authentication.k8s.io/v1beta1 API
 type execCredential struct {
 	Kind       string         `json:"kind"`
@@ -35,6 +41,9 @@ type execCredStatus struct {
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "version":
+			fmt.Printf("kboot %s (commit: %s, built: %s)\n", version, commit, date)
+			return
 		case "config":
 			if len(os.Args) > 2 && os.Args[2] == "add" {
 				handleConfigAdd(os.Args[3:])

@@ -1,0 +1,75 @@
+version: 2
+
+project_name: kboot
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    main: ./cmd/kboot
+    binary: kboot
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+      - -X main.builtBy=goreleaser
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - Merge pull request
+      - Merge branch
+      - '^chore:'
+
+release:
+  github:
+    owner: apavanello
+    name: kboot
+  footer: |
+    **Install with YOLO:**
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/apavanello/kboot/main/scripts/install.sh | bash
+    ```
+
+brews:
+  - name: kboot
+    homepage: https://github.com/apavanello/kboot
+    description: Boot into all your EKS clusters at once
+    license: MIT
+    repository:
+      owner: apavanello
+      name: homebrew-tap
+    install: |
+      bin.install "kboot"

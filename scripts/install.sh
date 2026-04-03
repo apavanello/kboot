@@ -5,6 +5,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 pass()  { echo -e "${GREEN}✓${NC} $*"; }
@@ -14,12 +15,124 @@ warn()  { echo -e "${YELLOW}!${NC} $*"; }
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_DIR="$HOME/.local/bin"
-KBOOT_BIN="$PROJECT_DIR/bin/kboot"
+KBOOT_BIN="$BIN_DIR/kboot"
+GITHUB_REPO="apavanello/kboot"
+GITHUB_API="https://api.github.com/repos/$GITHUB_REPO"
 
 ensure_bin_dir() {
     mkdir -p "$BIN_DIR"
     if ! echo "$PATH" | grep -q "$BIN_DIR"; then
         export PATH="$BIN_DIR:$PATH"
+    fi
+}
+
+get_latest_release() {
+    curl -sf "$GITHUB_API/releases/latest" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])" 2>/dev/null || echo ""
+}
+
+get_installed_version() {
+    if [ -x "$KBOOT_BIN" ]; then
+        "$KBOOT_BIN" version 2>/dev/null | grep -oP 'kboot \K[^ ]+' || echo "unknown"
+    else
+        echo "not-installed"
+    fi
+}
+
+version_gt() {
+    [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ] && [ "$1" != "$2" ]
+}
+
+download_release() {
+    local tag="$1"
+    local os arch ext="tar.gz"
+    
+    os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    arch="$(uname -m)"
+    [ "$arch" = "x86_64" ] && arch="amd64"
+    [ "$arch" = "aarch64" ] && arch="arm64"
+    [ "$os" = "darwin" ] && os="darwin"
+    [ "$os" = "linux" ] && os="linux"
+    
+    if [ "$os" = "windows" ]; then
+        ext="zip"
+    fi
+    
+    local filename="kboot_${tag#v}_${os}_${arch}.${ext}"
+    local download_url="$GITHUB_API/releases/download/$tag/$filename"
+    
+    info "Downloading $filename..."
+    local tmpfile="/tmp/$filename"
+    
+    if ! curl -fSL "$download_url" -o "$tmpfile" 2>/dev/null; then
+        warn "Release binary not found, falling back to source build..."
+        return 1
+    fi
+    
+    if [ "$ext" = "zip" ]; then
+        unzip -o "$tmpfile" -d /tmp/kboot_extract/
+    else
+        tar -xzf "$tmpfile" -C /tmp/kboot_extract/
+    fi
+    
+    mv /tmp/kboot_extract/kboot "$KBOOT_BIN"
+    chmod +x "$KBOOT_BIN"
+    rm -rf /tmp/kboot_extract "$tmpfile"
+    
+    pass "kboot $tag installed from release"
+    return 0
+}
+
+install_kboot() {
+    ensure_bin_dir
+    
+    local installed_ver
+    installed_ver="$(get_installed_version)"
+    local latest_tag
+    latest_tag="$(get_latest_release)"
+    
+    if [ "$installed_ver" != "not-installed" ] && [ "$installed_ver" != "unknown" ]; then
+        info "Installed version: $installed_ver"
+    fi
+    
+    if [ -n "$latest_tag" ]; then
+        info "Latest release: $latest_tag"
+        
+        if [ "$installed_ver" != "not-installed" ] && [ "$installed_ver" != "unknown" ]; then
+            local installed_clean="${installed_ver#v}"
+            local latest_clean="${latest_tag#v}"
+            
+            if [ "$installed_clean" = "$latest_clean" ]; then
+                pass "kboot is already up-to-date ($installed_ver)"
+                return 0
+            elif version_gt "$installed_clean" "$latest_clean"; then
+                warn "Installed version ($installed_ver) is newer than release ($latest_tag)"
+                warn "You may be running a development build"
+                return 0
+            else
+                info "Updating kboot from $installed_ver to $latest_tag..."
+            fi
+        fi
+        
+        mkdir -p /tmp/kboot_extract
+        if download_release "$latest_tag"; then
+            return 0
+        fi
+    fi
+    
+    info "Building kboot from source..."
+    if [ -f "$PROJECT_DIR/Makefile" ]; then
+        make -C "$PROJECT_DIR" build
+        if [ -f "$PROJECT_DIR/bin/kboot" ]; then
+            cp "$PROJECT_DIR/bin/kboot" "$KBOOT_BIN"
+            chmod +x "$KBOOT_BIN"
+            pass "kboot built and installed to $KBOOT_BIN"
+        else
+            fail "Build failed — binary not found"
+            exit 1
+        fi
+    else
+        fail "No Makefile found and no release available"
+        exit 1
     fi
 }
 
@@ -98,17 +211,6 @@ install_docker() {
     usermod -aG docker "$(whoami)" 2>/dev/null || true
     systemctl enable --now docker 2>/dev/null || true
     pass "Docker installed"
-}
-
-build_kboot() {
-    info "Building kboot..."
-    make -C "$PROJECT_DIR" build
-    if [ -f "$KBOOT_BIN" ]; then
-        pass "kboot built: $("$KBOOT_BIN" --help 2>&1 | head -1)"
-    else
-        fail "kboot build failed"
-        exit 1
-    fi
 }
 
 setup_infra() {
@@ -194,8 +296,10 @@ verify() {
         fi
     done
     
-    if [ -f "$KBOOT_BIN" ]; then
-        pass "kboot binary ready"
+    if [ -x "$KBOOT_BIN" ]; then
+        local ver
+        ver="$("$KBOOT_BIN" version 2>&1 || echo "unknown")"
+        pass "kboot ready: $ver"
     else
         fail "kboot binary missing"
         all_ok=false
@@ -216,6 +320,7 @@ verify() {
         echo "  kboot                    # Launch with all clusters"
         echo "  kboot --cluster staging  # Launch staging only"
         echo "  kboot config             # Manage clusters"
+        echo "  kboot version            # Show version info"
         echo "  kboot --help             # All options"
     else
         echo -e "${RED}Some checks failed. Review output above.${NC}"
@@ -223,25 +328,56 @@ verify() {
     fi
 }
 
-main() {
-    echo ""
+show_usage() {
     echo -e "${BLUE}╔══════════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║          kboot YOLO Installer                ║${NC}"
     echo -e "${BLUE}║          You Only Live Once                  ║${NC}"
     echo -e "${BLUE}╚══════════════════════════════════════════════╝${NC}"
     echo ""
+    echo "Usage: $0 [command]"
+    echo ""
+    echo "Commands:"
+    echo "  install (default)  Install or update kboot + dependencies"
+    echo "  update             Update kboot to latest release only"
+    echo "  full               Install everything + setup test infra"
+    echo "  help               Show this help"
+    echo ""
+    echo "Examples:"
+    echo "  curl -fsSL .../install.sh | bash        # Install/update kboot"
+    echo "  curl -fsSL .../install.sh | bash -s full # Full setup with infra"
+}
+
+main() {
+    local command="${1:-install}"
     
-    ensure_bin_dir
-    install_go
-    install_docker
-    install_kubectl
-    install_kind
-    install_terraform
-    install_k9s
-    build_kboot
-    setup_infra
-    configure_kboot
-    verify
+    case "$command" in
+        install|update)
+            ensure_bin_dir
+            install_kboot
+            verify
+            ;;
+        full)
+            ensure_bin_dir
+            install_go
+            install_docker
+            install_kubectl
+            install_kind
+            install_terraform
+            install_k9s
+            install_kboot
+            setup_infra
+            configure_kboot
+            verify
+            ;;
+        help|--help|-h)
+            show_usage
+            ;;
+        *)
+            echo "Unknown command: $command"
+            show_usage
+            exit 1
+            ;;
+    esac
 }
 
 main "$@"
