@@ -109,6 +109,7 @@ type AuthFormData struct {
 	AccessKey   string
 	SecretKey   string
 	Token       string
+	Endpoint    string
 	SessionName string
 	StartURL    string
 	Region      string
@@ -655,17 +656,9 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if idx >= 0 && idx < len(m.staticCreds) {
 					cred := m.staticCreds[idx]
 					m.authFormData = &AuthFormData{
-						Profile:   cred.ProfileName,
-						AccessKey: cred.AccessKey, // Note: This is masked, user will overwrite
-						SecretKey: cred.SecretKey, // This is masked
-						Token:     cred.Token,     // This is masked
+						Profile:  cred.ProfileName,
+						Endpoint: loadEndpointForProfile(cred.ProfileName),
 					}
-					// If editing, we probably want to clear masked values or keep them if unchanged logic is implemented.
-					// For simplicity in CLI editors, usually we ask to re-enter secrets or keep old if empty.
-					// Here, simplified: User re-enters.
-					m.authFormData.AccessKey = ""
-					m.authFormData.SecretKey = ""
-					m.authFormData.Token = ""
 
 					m.form = newStaticCredentialForm(m.authFormData)
 					m.authEditIdx = idx
@@ -717,9 +710,9 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.form.State == huh.StateCompleted {
-			// Save to ~/.aws/credentials
 			home, _ := getHomeDir()
 			credPath := filepath.Join(home, ".aws", "credentials")
+			configPath := filepath.Join(home, ".aws", "config")
 
 			content := fmt.Sprintf("\n[%s]\naws_access_key_id = %s\naws_secret_access_key = %s\n",
 				strings.TrimSpace(m.authFormData.Profile),
@@ -731,8 +724,6 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if m.view == viewStaticEditForm {
-				// EDIT is hard without full parser.
-				// Deleting old and appending new is a strategy.
 				if deleteStaticCredential(m.staticCreds[m.authEditIdx].ProfileName) {
 					appendToFile(credPath, content)
 					m.status = "Atualizado (Recriado no final do arquivo)"
@@ -742,6 +733,32 @@ func (m managerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				appendToFile(credPath, content)
 				m.status = "Adicionado"
+			}
+
+			if ep := strings.TrimSpace(m.authFormData.Endpoint); ep != "" {
+				profileBlock := fmt.Sprintf("\n[profile %s]\nendpoint_url = %s\n",
+					strings.TrimSpace(m.authFormData.Profile), ep)
+				appendToFile(configPath, profileBlock)
+				m.status += " + endpoint configurado"
+			}
+
+			if m.view == viewStaticEditForm {
+				if deleteStaticCredential(m.staticCreds[m.authEditIdx].ProfileName) {
+					appendToFile(credPath, content)
+					m.status = "Atualizado (Recriado no final do arquivo)"
+				} else {
+					m.status = "Erro ao atualizar"
+				}
+			} else {
+				appendToFile(credPath, content)
+				m.status = "Adicionado"
+			}
+
+			if ep := strings.TrimSpace(m.authFormData.Endpoint); ep != "" {
+				profileBlock := fmt.Sprintf("\n[profile %s]\nendpoint_url = %s\n",
+					strings.TrimSpace(m.authFormData.Profile), ep)
+				appendToFile(configPath, profileBlock)
+				m.status += " + endpoint configurado"
 			}
 
 			// Refresh List
@@ -1061,8 +1078,9 @@ func newStaticCredentialForm(data *AuthFormData) *huh.Form {
 		huh.NewGroup(
 			huh.NewInput().Title("Nome do Perfil").Value(&data.Profile),
 			huh.NewInput().Title("Access Key").Value(&data.AccessKey),
-			huh.NewInput().Title("Secret Key").Password(true).Value(&data.SecretKey),
-			huh.NewInput().Title("Token (Opional)").Value(&data.Token),
+			huh.NewInput().Title("Secret Key").EchoMode(huh.EchoModePassword).Value(&data.SecretKey),
+			huh.NewInput().Title("Token (Opcional)").Value(&data.Token),
+			huh.NewInput().Title("Endpoint (Opcional, ex: http://localhost:4566)").Value(&data.Endpoint),
 		),
 	)
 }
@@ -1131,4 +1149,37 @@ func deleteSSOProfile(profileName string) bool {
 	}
 	os.WriteFile(path, []byte(strings.Join(output, "\n")), 0600)
 	return deleted
+}
+
+func loadEndpointForProfile(profileName string) string {
+	home, _ := getHomeDir()
+	path := filepath.Join(home, ".aws", "config")
+	input, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(input), "\n")
+	inSection := false
+	profileSection := fmt.Sprintf("[profile %s]", profileName)
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if t == profileSection {
+			inSection = true
+			continue
+		}
+		if strings.HasPrefix(t, "[") {
+			if inSection {
+				break
+			}
+			inSection = false
+			continue
+		}
+		if inSection && strings.HasPrefix(t, "endpoint_url") {
+			parts := strings.SplitN(t, "=", 2)
+			if len(parts) == 2 {
+				return strings.TrimSpace(parts[1])
+			}
+		}
+	}
+	return ""
 }

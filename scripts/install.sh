@@ -213,10 +213,10 @@ verify() {
         echo -e "${GREEN}All checks passed! kboot is ready to use.${NC}"
         echo ""
         echo -e "${BLUE}Quick start:${NC}"
-        echo "  ./bin/kboot                    # Launch with all clusters"
-        echo "  ./bin/kboot --cluster staging  # Launch staging only"
-        echo "  ./bin/kboot config             # Manage clusters"
-        echo "  ./bin/kboot --help             # All options"
+        echo "  kboot                    # Launch with all clusters"
+        echo "  kboot --cluster staging  # Launch staging only"
+        echo "  kboot config             # Manage clusters"
+        echo "  kboot --help             # All options"
     else
         echo -e "${RED}Some checks failed. Review output above.${NC}"
         exit 1
