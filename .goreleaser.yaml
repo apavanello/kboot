@@ -67,7 +67,7 @@ brews:
   - name: kboot
     homepage: https://github.com/apavanello/kboot
     description: Boot into all your EKS clusters at once
-    license: MIT
+    license: Apache-2.0
     repository:
       owner: apavanello
       name: homebrew-tap

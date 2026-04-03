@@ -414,4 +414,4 @@ kboot/
 
 ## Licença
 
-MIT
+Apache-2.0
