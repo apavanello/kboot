@@ -2,6 +2,12 @@
 
 > **Conecte-se a todos os seus clusters EKS de uma vez.**
 
+[![Latest Release](https://img.shields.io/github/v/release/apavanello/kboot?sort=semver&color=blue)](https://github.com/apavanello/kboot/releases)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/apavanello/kboot)](https://go.dev)
+[![License](https://img.shields.io/github/license/apavanello/kboot)](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/apavanello/kboot)](https://goreportcard.com/report/github.com/apavanello/kboot)
+[![Release](https://github.com/apavanello/kboot/actions/workflows/release.yml/badge.svg)](https://github.com/apavanello/kboot/actions/workflows/release.yml)
+
 **kboot** é uma ferramenta CLI de DevOps projetada para simplificar o gerenciamento de múltiplos clusters Amazon EKS em diferentes contas AWS. Automatiza a autenticação via AWS SSO, gera kubeconfigs com contexto para os clusters selecionados em paralelo, e inicia o [`k9s`](https://k9scli.io/) com todos os clusters imediatamente acessíveis — sem poluir seu `~/.kube/config`.
 
 ## Índice

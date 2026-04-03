@@ -2,6 +2,12 @@
 
 > **Boot into all your EKS clusters at once.**
 
+[![Latest Release](https://img.shields.io/github/v/release/apavanello/kboot?sort=semver&color=blue)](https://github.com/apavanello/kboot/releases)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/apavanello/kboot)](https://go.dev)
+[![License](https://img.shields.io/github/license/apavanello/kboot)](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/apavanello/kboot)](https://goreportcard.com/report/github.com/apavanello/kboot)
+[![Release](https://github.com/apavanello/kboot/actions/workflows/release.yml/badge.svg)](https://github.com/apavanello/kboot/actions/workflows/release.yml)
+
 **kboot** is a DevOps CLI tool designed to simplify managing multiple Amazon EKS clusters across different AWS accounts. It automates authentication via AWS SSO, generates context-aware kubeconfigs for selected clusters in parallel, and launches [`k9s`](https://k9scli.io/) with all clusters immediately accessible — without polluting your `~/.kube/config`.
 
 ## Table of Contents
