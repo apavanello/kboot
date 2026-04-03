@@ -12,14 +12,21 @@ fail()  { echo -e "${RED}✗${NC} $*"; }
 info()  { echo -e "${BLUE}→${NC} $*"; }
 warn()  { echo -e "${YELLOW}!${NC} $*"; }
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Determine project directory safely
+# When running via 'curl | bash', BASH_SOURCE is not set
+if [ -n "${BASH_SOURCE[0]:-}" ]; then
+    PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+else
+    PROJECT_DIR=""
+fi
+
 BIN_DIR="$HOME/.local/bin"
 KBOOT_BIN="$BIN_DIR/kboot"
 GITHUB_REPO="apavanello/kboot"
 GITHUB_API="https://api.github.com/repos/$GITHUB_REPO"
 
 is_local_repo() {
-    [ -f "$PROJECT_DIR/Makefile" ] && [ -d "$PROJECT_DIR/.git" ]
+    [ -n "$PROJECT_DIR" ] && [ -f "$PROJECT_DIR/Makefile" ] && [ -d "$PROJECT_DIR/.git" ]
 }
 
 ensure_bin_dir() {
@@ -61,7 +68,7 @@ download_release() {
     local tmpfile="/tmp/$filename"
     
     if ! curl -fSL "$download_url" -o "$tmpfile" 2>/dev/null; then
-        warn "Release binary not found"
+        warn "Release binary not found at $download_url"
         return 1
     fi
     
