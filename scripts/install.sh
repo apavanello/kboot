@@ -24,6 +24,8 @@ BIN_DIR="$HOME/.local/bin"
 KBOOT_BIN="$BIN_DIR/kboot"
 GITHUB_REPO="apavanello/kboot"
 GITHUB_API="https://api.github.com/repos/$GITHUB_REPO"
+GITHUB_RAW="https://raw.githubusercontent.com/$GITHUB_REPO/main"
+GITHUB_DL="https://github.com/$GITHUB_REPO/releases/download"
 
 is_local_repo() {
     [ -n "$PROJECT_DIR" ] && [ -f "$PROJECT_DIR/Makefile" ] && [ -d "$PROJECT_DIR/.git" ]
@@ -62,7 +64,7 @@ download_release() {
     [ "$arch" = "aarch64" ] && arch="arm64"
     
     local filename="kboot_${tag#v}_${os}_${arch}.${ext}"
-    local download_url="$GITHUB_API/releases/download/$tag/$filename"
+    local download_url="$GITHUB_DL/$tag/$filename"
     
     info "Downloading $filename..."
     local tmpfile="/tmp/$filename"
