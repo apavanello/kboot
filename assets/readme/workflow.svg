@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="180" viewBox="0 0 1200 180"
+     role="img" aria-labelledby="title desc">
+  <title id="title">How kboot works</title>
+  <desc id="desc">Terminal-style flow diagram showing kboot's parallel authentication and kubeconfig generation process.</desc>
+
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#8b949e"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="180" rx="8" fill="#0d1117"/>
+
+  <!-- Terminal header -->
+  <rect x="0" y="0" width="1200" height="28" rx="8" fill="#161b22"/>
+  <rect x="0" y="16" width="1200" height="12" fill="#161b22"/>
+  <circle cx="16" cy="12" r="5" fill="#ff5f57"/>
+  <circle cx="32" cy="12" r="5" fill="#febc2e"/>
+  <circle cx="48" cy="12" r="5" fill="#28c840"/>
+  <text x="600" y="17" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">kboot workflow</text>
+
+  <!-- Flow nodes -->
+  <g transform="translate(0, 50)">
+    
+    <!-- Node 1: Config -->
+    <g transform="translate(40, 0)">
+      <rect x="0" y="0" width="140" height="70" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+      <text x="70" y="24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#b067e8" text-anchor="middle">~/.kboot.yaml</text>
+      <text x="70" y="48" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">cluster list</text>
+      <!-- Terminal prompt -->
+      <text x="10" y="65" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9" fill="#28c840">$</text>
+    </g>
+    
+    <!-- Arrow 1 -->
+    <line x1="180" y1="35" x2="220" y2="35" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arrow)"/>
+    
+    <!-- Node 2: Parallel Auth -->
+    <g transform="translate(220, 0)">
+      <rect x="0" y="0" width="180" height="70" rx="6" fill="#161b22" stroke="#b067e8" stroke-width="1.5"/>
+      <text x="90" y="22" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#e6edf3" text-anchor="middle">Parallel Workers</text>
+      <text x="90" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">AWS SDK v2</text>
+      <text x="90" y="55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">5 concurrent</text>
+      <!-- Spinner animation -->
+      <text x="160" y="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#b067e8">⟳</text>
+    </g>
+    
+    <!-- Arrow 2 -->
+    <line x1="400" y1="35" x2="440" y2="35" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arrow)"/>
+    
+    <!-- Node 3: Auth Check -->
+    <g transform="translate(440, 0)">
+      <rect x="0" y="0" width="120" height="70" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+      <text x="60" y="22" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#e6edf3" text-anchor="middle">STS Check</text>
+      <text x="60" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">SSO / Static</text>
+      <text x="60" y="55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">GetIdentity</text>
+    </g>
+    
+    <!-- Arrow 3 -->
+    <line x1="560" y1="35" x2="600" y2="35" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arrow)"/>
+    
+    <!-- Node 4: EKS -->
+    <g transform="translate(600, 0)">
+      <rect x="0" y="0" width="120" height="70" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+      <text x="60" y="22" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#e6edf3" text-anchor="middle">EKS API</text>
+      <text x="60" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">endpoint + CA</text>
+      <text x="60" y="55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">DescribeCluster</text>
+    </g>
+    
+    <!-- Arrow 4 -->
+    <line x1="720" y1="35" x2="760" y2="35" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arrow)"/>
+    
+    <!-- Node 5: Kubeconfig -->
+    <g transform="translate(760, 0)">
+      <rect x="0" y="0" width="130" height="70" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+      <text x="65" y="22" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#28c840" text-anchor="middle">Kubeconfigs</text>
+      <text x="65" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">/tmp/kboot/</text>
+      <text x="65" y="55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">temp files</text>
+    </g>
+    
+    <!-- Arrow 5 -->
+    <line x1="890" y1="35" x2="930" y2="35" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arrow)"/>
+    
+    <!-- Node 6: k9s -->
+    <g transform="translate(930, 0)">
+      <rect x="0" y="0" width="120" height="70" rx="6" fill="#161b22" stroke="#ff6b6b" stroke-width="1.5"/>
+      <text x="60" y="22" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#ff6b6b" text-anchor="middle">k9s Launch</text>
+      <text x="60" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">exec replaces</text>
+      <text x="60" y="55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">process</text>
+    </g>
+    
+    <!-- Output indicator -->
+    <g transform="translate(1060, 10)">
+      <text font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#28c840">→</text>
+      <text x="16" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e">ready</text>
+    </g>
+    
+  </g>
+
+  <!-- Bottom note -->
+  <text x="600" y="160" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">All AWS interactions use SDK directly — no subprocess calls, no shell injection vectors</text>
+</svg>

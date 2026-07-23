@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="160" viewBox="0 0 1200 160"
+     role="img" aria-labelledby="title desc">
+  <title id="title">Security architecture</title>
+  <desc id="desc">Visual representation of kboot's isolated credential management and security boundaries.</desc>
+
+  <!-- Background -->
+  <rect width="1200" height="160" rx="8" fill="#0d1117"/>
+
+  <!-- Terminal header -->
+  <rect x="0" y="0" width="1200" height="28" rx="8" fill="#161b22"/>
+  <rect x="0" y="16" width="1200" height="12" fill="#161b22"/>
+  <circle cx="16" cy="12" r="5" fill="#ff5f57"/>
+  <circle cx="32" cy="12" r="5" fill="#febc2e"/>
+  <circle cx="48" cy="12" r="5" fill="#28c840"/>
+  <text x="600" y="17" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">security isolation</text>
+
+  <!-- Security diagram -->
+  <g transform="translate(40, 40)">
+    
+    <!-- System AWS (faded/locked) -->
+    <g transform="translate(0, 0)">
+      <rect x="0" y="0" width="220" height="100" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1" stroke-dasharray="4,4"/>
+      <text x="110" y="28" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#8b949e" text-anchor="middle">~/.aws/</text>
+      <text x="110" y="48" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">system credentials</text>
+      <text x="110" y="72" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#ff5f57" text-anchor="middle">⊘ untouched</text>
+      <!-- Lock icon -->
+      <text x="110" y="95" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#30363d" text-anchor="middle">🔒</text>
+    </g>
+    
+    <!-- Separator -->
+    <line x1="260" y1="10" x2="260" y2="90" stroke="#21262d" stroke-width="2" stroke-dasharray="6,4"/>
+    <text x="260" y="55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9" fill="#8b949e" text-anchor="middle" transform="rotate(-90, 260, 55)">boundary</text>
+    
+    <!-- kboot isolated (active) -->
+    <g transform="translate(300, 0)">
+      <rect x="0" y="0" width="260" height="100" rx="6" fill="#161b22" stroke="#28c840" stroke-width="1.5"/>
+      <text x="130" y="28" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#28c840" text-anchor="middle">~/.kboot/aws/</text>
+      <text x="130" y="48" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">isolated credentials</text>
+      <text x="130" y="68" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">credentials + config + sso cache</text>
+      <!-- Shield icon -->
+      <text x="130" y="92" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" fill="#28c840" text-anchor="middle">✓</text>
+    </g>
+    
+    <!-- Separator 2 -->
+    <line x1="600" y1="10" x2="600" y2="90" stroke="#21262d" stroke-width="2" stroke-dasharray="6,4"/>
+    
+    <!-- Temp kubeconfigs -->
+    <g transform="translate(640, 0)">
+      <rect x="0" y="0" width="220" height="100" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+      <text x="110" y="28" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#b067e8" text-anchor="middle">/tmp/kboot/</text>
+      <text x="110" y="48" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">temporary kubeconfigs</text>
+      <text x="110" y="68" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">cleaned on exit</text>
+      <!-- Timer icon -->
+      <text x="110" y="92" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" fill="#b067e8" text-anchor="middle">⏱</text>
+    </g>
+    
+    <!-- Separator 3 -->
+    <line x1="900" y1="10" x2="900" y2="90" stroke="#21262d" stroke-width="2" stroke-dasharray="6,4"/>
+    
+    <!-- k8s config (untouched) -->
+    <g transform="translate(940, 0)">
+      <rect x="0" y="0" width="220" height="100" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1" stroke-dasharray="4,4"/>
+      <text x="110" y="28" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#8b949e" text-anchor="middle">~/.kube/config</text>
+      <text x="110" y="48" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#8b949e" text-anchor="middle">global kubeconfig</text>
+      <text x="110" y="72" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#ff5f57" text-anchor="middle">⊘ never modified</text>
+      <!-- Lock icon -->
+      <text x="110" y="95" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#30363d" text-anchor="middle">🔒</text>
+    </g>
+    
+  </g>
+</svg>
